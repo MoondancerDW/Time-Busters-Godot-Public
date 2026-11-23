@@ -184,7 +184,7 @@ def build(plan, owner_source, timeout):
         (output / name).mkdir()
     write_json(output / "build-plan.json", plan)
     owner = types.ModuleType("timebusters_packaged_process_owner")
-    exec(compile(owner_source, OWNER_MEMBER, "exec"), owner.__dict__)
+    exec(compile(owner_source, OWNER_PATH, "exec"), owner.__dict__)
     environment = os.environ | {"TMP": str(output / "tmp"), "TEMP": str(output / "tmp")}
     stages = []
     result = {"passed": False, "stages": stages, "build_plan_sha256": sha(output / "build-plan.json")}

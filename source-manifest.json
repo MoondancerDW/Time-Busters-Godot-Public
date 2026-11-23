@@ -39,8 +39,8 @@
       "sha256": "96fc16628ea66c1d2b894fe59dda7ec55a77cb730fa50f590cabafb4ab3f3e43"
     },
     "extras/rebuild_native.py": {
-      "bytes": 12872,
-      "sha256": "f73aa74d484181fc9ec8992606c7eb211a3b6333350375a49e7cd62b4558482a"
+      "bytes": 12870,
+      "sha256": "563a7906ed8371cff441ceb41f339fa1ef9223bcec89d1a463dc34ff81efe0e4"
     },
     "godot-accepted/native/tb_reference.gdextension": {
       "bytes": 229,
