@@ -1,0 +1,731 @@
+#include "bb/tb_level.h"
+#include "bb/tb_actor.h"
+#include "bb/tim.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <format>
+#include <map>
+#include <numbers>
+#include <ranges>
+#include <set>
+#include <tuple>
+
+namespace bb {
+namespace {
+
+struct In {
+    std::span<const uint8_t> d;
+    const char* what;
+    void need(size_t p, size_t n) const {
+        if (p > d.size() || d.size() - p < n)
+            throw FormatError(std::format("{}: {} bytes at offset 0x{:x} past end (0x{:x})", what, n, p, d.size()));
+    }
+    uint8_t u8(size_t p) const { need(p, 1); return d[p]; }
+    uint16_t u16(size_t p) const { need(p, 2); return uint16_t(d[p] | d[p + 1] << 8); }
+    int16_t s16(size_t p) const { return int16_t(u16(p)); }
+    uint32_t u32(size_t p) const { need(p, 4); return uint32_t(u16(p)) | uint32_t(u16(p + 2)) << 16; }
+};
+
+// ---------------------------------------------------------------- section 1 (TB_LEVELS.md §3)
+struct Sz { uint8_t tag, size; };
+using Table = std::array<int8_t, 256>;  // payload size per tag, -1 = no handler
+
+constexpr Sz kLogic[] = {{0x4d, 2}, {0x4e, 4}, {0x4f, 8}, {0x50, 8}, {0x51, 8}, {0x52, 8}, {0x53, 6},
+                         {0x54, 12}, {0x55, 12}, {0x56, 16}, {0x57, 20}, {0x58, 8}, {0x59, 4}, {0x5a, 8},
+                         {0x5b, 8}, {0x5c, 2}, {0x5d, 8}, {0x5e, 12}, {0x5f, 16}, {0x60, 8}};
+constexpr Sz kEnt[] = {{0x0b, 4}, {0x0c, 4}, {0x0f, 2}, {0x10, 12}, {0x11, 6}, {0x12, 12}, {0x13, 1}, {0x15, 1},
+                       {0x16, 28}, {0x19, 4}, {0x1a, 4}, {0x1b, 6}, {0x1c, 8}, {0x1d, 4}, {0x1e, 2}, {0x1f, 1},
+                       {0x27, 4}, {0x2f, 48}, {0x31, 12}, {0x37, 10}, {0x38, 2}, {0x39, 12}, {0x40, 20},
+                       {0x41, 6}, {0x45, 2}, {0x61, 14}, {0x62, 0}, {0x65, 2}};
+constexpr Sz kAudio[] = {{0x01, 8}, {0x02, 8}, {0x04, 12}, {0x43, 12}, {0x4b, 56}, {0x4c, 56}};
+constexpr Sz kMusic[] = {{0x06, 3}};
+constexpr Sz kWorld[] = {{0x10, 12}, {0x11, 6}, {0x12, 12}, {0x21, 4}, {0x24, 8}, {0x38, 2}, {0x42, 1}, {0x62, 0}};
+constexpr Sz kAsset[] = {{0x0d, 12}, {0x24, 8}, {0x25, 8}, {0x26, 4}, {0x27, 4}, {0x3e, 12}, {0x3f, 8}};
+constexpr Sz kTex[] = {{0x29, 8}};
+constexpr Sz k35[] = {{0x36, 8}};
+constexpr Sz kParams[] = {{0x2a, 8}, {0x3c, 14}, {0x3d, 36}, {0x66, 3}};
+constexpr Sz k46[] = {{0x47, 8}};
+constexpr Sz kLang[] = {{0x49, 56}, {0x68, 56}};
+
+constexpr Table table(std::span<const Sz> a, std::span<const Sz> b = {}) {
+    Table t{};
+    t.fill(-1);
+    for (Sz s : a) t[s.tag] = int8_t(s.size);
+    for (Sz s : b) t[s.tag] = int8_t(s.size);
+    return t;
+}
+constexpr Table tEnt = table(kEnt, kLogic), tAudio = table(kAudio), tMusic = table(kMusic), tWorld = table(kWorld),
+                tAsset = table(kAsset, kLogic), tTex = table(kTex), t35 = table(k35), tParams = table(kParams),
+                t46 = table(k46), tLang = table(kLang);
+
+const Table* tagTable(uint8_t type) {
+    switch (type) {
+    case 0x00: return &tAudio;
+    case 0x05: return &tMusic;
+    case 0x07: case 0x08: case 0x09: case 0x0a: case 0x63: return &tEnt;
+    case 0x20: return &tWorld;
+    case 0x22: return &tAsset;
+    case 0x28: return &tTex;
+    case 0x35: return &t35;
+    case 0x3a: return &tParams;
+    case 0x46: return &t46;
+    case 0x48: return &tLang;
+    default: return nullptr;
+    }
+}
+
+uint32_t le32(std::span<const uint8_t> b, size_t p) { return uint32_t(b[p] | b[p + 1] << 8 | b[p + 2] << 16 | uint32_t(b[p + 3]) << 24); }
+uint16_t le16(std::span<const uint8_t> b, size_t p) { return uint16_t(b[p] | b[p + 1] << 8); }
+// Entity tags 0x10/0x12: three i32 fields of which the game reads the low s16 halves (TB_LEVELS.md §3.3).
+std::array<float, 3> lowHalves(std::span<const uint8_t> b) {
+    return {float(int16_t(le16(b, 0))), float(int16_t(le16(b, 4))), float(int16_t(le16(b, 8)))};
+}
+
+// ---------------------------------------------------------------- geometry (MODELS.md §10)
+// PS1 placement: p = R * (S * v) + t, then engine = (x, -y, -z) (scene.h).
+struct Xform {
+    float s[3] = {1, 1, 1}, t[3] = {0, 0, 0}, cy = 1, sy = 0;  // rotation about PS1 Y only
+    std::array<float, 3> apply(float x, float y, float z) const {
+        x *= s[0], y *= s[1], z *= s[2];
+        const float rx = cy * x + sy * z, rz = -sy * x + cy * z;  // PsyQ RotMatrix, Y component
+        return {rx + t[0], -(y + t[1]), -(rz + t[2])};
+    }
+};
+
+// 4.12 angle (0x1000 = 360 degrees) -> radians.
+float angle(int16_t a) { return float(a) * 2.0f * std::numbers::pi_v<float> / 4096.0f; }
+
+// FUN_00405c90 CheckPrimValidity.
+bool primValid(uint8_t b0, uint8_t b1) {
+    return (b0 & 4) && (b0 & 0x20) && !(b0 & 0x40) && !(!(b0 & 8) && (b1 & 0x20)) && !((b1 & 0x40) && (b0 & 2));
+}
+
+// b1 bit 6 (no UVs): i0..i3 get (0,0) (1,0) (1,1) (0,1) [GLQ], in UV-byte units.
+constexpr uint8_t kNoUv[4][2] = {{0, 0}, {255, 0}, {255, 255}, {0, 255}};
+
+using Vec3 = std::array<float, 3>;
+
+struct Builder {
+    Scene& s;
+    std::map<uint32_t, int32_t> tex;    // texture id -> Scene::textures index
+    std::map<uint32_t, int32_t> links;  // texture link id -> Scene::textureAnims index (TEXTURE_GAP.md)
+    std::set<uint32_t> missing;
+    std::map<std::tuple<uint32_t, int32_t, Blend, bool>, size_t> meshOf;
+    uint32_t nextGroup = 0;
+    bool world = false;       // building a chunk-0x20 world model (stats split)
+    uint64_t lodFaces = 0;    // tree C (far LOD) faces: decoded, not drawn
+    std::vector<Vec3> verts;  // current leaf / object table, transformed
+
+    // Face texture id -> texture index (>= 0), texture link (-2 - anim index), or -1 = alias 0. The original resolves
+    // ids through the alias table 0x4d038c and skips prims whose alias is 0 (TEXTURE_GAP.md §1); counted here.
+    int32_t resolve(uint32_t id) {
+        if (auto it = tex.find(id); it != tex.end()) return it->second;
+        if (auto it = links.find(id); it != links.end()) {
+            ++s.stats.linkedFaces;
+            return -2 - it->second;
+        }
+        ++s.stats.missingTextureFaces;
+        s.stats.worldMissingTextureFaces += world;
+        missing.insert(id);
+        return -1;
+    }
+
+    const Texture& fallback(int32_t key) const {
+        return s.textures[size_t(key >= 0 ? key : s.textureAnims[size_t(-2 - key)].frames[s.textureAnims[size_t(-2 - key)].startFrame])];
+    }
+
+    // `key` as returned by resolve(); a link mesh binds the link's start frame as its static fallback.
+    Mesh& mesh(uint32_t group, const std::string& gname, int32_t key, Blend b, bool twoSided) {
+        auto [it, fresh] = meshOf.try_emplace({group, key, b, twoSided}, s.meshes.size());
+        if (fresh) {
+            Mesh& m = s.meshes.emplace_back();
+            const int32_t anim = key >= 0 ? -1 : -2 - key;
+            m.name = anim < 0 ? std::format("{}/tex{}{}", gname, key, twoSided ? "/2s" : "")
+                              : std::format("{}/link{}{}", gname, s.textureAnims[size_t(anim)].linkId, twoSided ? "/2s" : "");
+            m.texture = int32_t(&fallback(key) - s.textures.data());
+            m.textureAnim = anim;
+            m.blend = b;
+            m.twoSided = twoSided;
+        }
+        return s.meshes[it->second];
+    }
+
+    bool hasAlpha(int32_t key) const {
+        if (key >= 0) return s.textures[size_t(key)].hasAlpha;
+        return std::ranges::any_of(s.textureAnims[size_t(-2 - key)].frames, [&](int32_t f) { return s.textures[size_t(f)].hasAlpha; });
+    }
+
+    void checkIndices(const uint32_t* idx, int n, const std::string& gname, size_t r) const {
+        for (int k = 0; k < n; ++k)
+            if (idx[k] >= verts.size())
+                throw FormatError(std::format("{}: vertex index {} >= {} in primitive at 0x{:x}", gname, idx[k], verts.size(), r));
+    }
+
+    // One primitive: record at r (b0 @0, b1 @1, tex @2, colours @4..), vertex indices idx[0..n), UV byte pairs
+    // at uvAt[k] (nullptr = b1 bit 6 fixed UVs), tpage byte at tpageAt. Opaque meshes share `group`;
+    // translucent ones use `sortGroup` so the renderer can sort them by a small centre.
+    void prim(const In& in, size_t r, int n, const uint32_t* idx, const size_t* uvAt, size_t tpageAt, uint32_t group,
+              uint32_t sortGroup, const std::string& gname) {
+        const uint8_t b0 = in.u8(r), b1 = in.u8(r + 1);
+        const int32_t key = resolve(in.u16(r + 2) & 0xfff);
+        checkIndices(idx, n, gname, r);
+        if (key == -1) return;  // alias 0: not drawn
+        Blend blend = Blend::Opaque;
+        uint8_t alpha = 255;
+        if (b0 & 2) {  // semi-transparent: ABR from the tpage byte bits 5-6 (same mapping as LiT, scene.h)
+            switch (in.u8(tpageAt) >> 5 & 3) {
+            case 0: blend = Blend::Alpha, alpha = 128; break;
+            case 1: blend = Blend::Additive; break;
+            case 2: blend = Blend::Subtract; break;
+            case 3: blend = Blend::Additive, alpha = 64; break;
+            }
+        } else if (hasAlpha(key)) blend = Blend::AlphaTest;
+        const bool translucent = blend != Blend::Opaque && blend != Blend::AlphaTest;
+        // b1 bit 4 -> render flag 0x80: the screen-space back-face test is skipped (FUN_0041eee0).
+        Mesh& m = mesh(translucent ? sortGroup : group, gname, key, blend, b1 & 0x10);
+        const float tw = float(fallback(key).width), th = float(fallback(key).height);
+        const bool gouraud = b0 & 0x10;  // else colour 0 for every vertex [COL]
+        const uint32_t base = uint32_t(m.vertices.size());
+        for (int k = 0; k < n; ++k) {
+            Vertex v{};
+            std::copy(verts[idx[k]].begin(), verts[idx[k]].end(), v.pos);
+            const uint8_t u = uvAt ? in.u8(uvAt[k]) : kNoUv[k][0], w = uvAt ? in.u8(uvAt[k] + 1) : kNoUv[k][1];
+            // Same texel convention as LiT (level.cpp): uv/255 over size-1, v measured from the bottom row.
+            v.uv[0] = (float(u) / 255.0f * (tw - 1.0f) + 0.5f) / tw;
+            v.uv[1] = ((1.0f - float(w) / 255.0f) * (th - 1.0f) + 0.5f) / th;
+            const size_t c = r + 4 + (gouraud ? size_t(k) * 4 : 0);
+            v.rgba[0] = in.u8(c), v.rgba[1] = in.u8(c + 1), v.rgba[2] = in.u8(c + 2), v.rgba[3] = alpha;
+            m.vertices.push_back(v);
+        }
+        // PS1 Z order quads (outline i0 i1 i3 i2): triangles (0,1,2) + (1,3,2), emitted reversed as in LiT.
+        m.indices.insert(m.indices.end(), {base, base + 2, base + 1});
+        if (n == 4) m.indices.insert(m.indices.end(), {base + 1, base + 2, base + 3});
+        ++s.stats.faces;
+        s.stats.triangles += uint32_t(n - 2);
+    }
+
+    // Octree model (MODELS.md §10.1): trees A (main), B (alt) and C (detail), 8-byte s16 vertices per leaf and
+    // 28-byte primitives with a shared 12-byte UV table.
+    void octree(std::span<const uint8_t> m, const Xform& xf, const std::string& gname) {
+        const In in{m, "octree model"};
+        const uint32_t uvTab = in.u32(8), group = nextGroup++;
+        std::vector<bool> seen(m.size());
+        // Members through `b`: GCC 14 rejects any member access (implicit or this->) in a deducing-this lambda.
+        const auto walk = [&, &b = *this](this const auto& self, size_t node, size_t root, int depth, bool draw) -> void {
+            if (depth > 16) throw FormatError(std::format("{}: octree deeper than 16 at 0x{:x}", gname, node));
+            in.need(node, 0x14);
+            if (seen[node]) throw FormatError(std::format("{}: octree node 0x{:x} reached twice", gname, node));
+            seen[node] = true;
+            const uint8_t kind = in.u8(node + 2);
+            if (kind == 1) {
+                for (size_t k = 0; k < 8; ++k)
+                    if (const uint16_t c = in.u16(node + 0x10 + 2 * k)) self(root + size_t(c) * 4, root, depth + 1, draw);
+                return;
+            }
+            if (kind != 0) throw FormatError(std::format("{}: octree node 0x{:x} kind {}", gname, node, kind));
+            const uint16_t nv = in.u16(node + 0x10), np = in.u16(node + 0x12);
+            in.need(node + 0x14, size_t(nv) * 8 + size_t(np) * 28);
+            b.verts.resize(nv);
+            // GL vertex transform 0x408990 rejects a vertex whose model x or y lies outside ±32000 (marker
+            // 3.4e38), and 0x41eee0 then drops every polygon using it (VIR01 / VICASG04 sky domes, r up to 32299).
+            std::vector<bool> rejected(nv);
+            for (size_t i = 0; i < nv; ++i) {
+                const size_t q = node + 0x14 + i * 8;
+                b.verts[i] = xf.apply(in.s16(q), in.s16(q + 2), in.s16(q + 4));
+                rejected[i] = std::abs(in.s16(q)) > 32000 || std::abs(in.s16(q + 2)) > 32000;
+            }
+            const uint32_t sortGroup = b.nextGroup++;
+            for (size_t i = 0; i < np; ++i) {
+                const size_t r = node + 0x14 + size_t(nv) * 8 + i * 28;
+                const uint8_t b0 = in.u8(r), b1 = in.u8(r + 1);
+                if (!primValid(b0, b1)) {
+                    ++b.s.stats.invalidPrims;
+                    continue;
+                }
+                const int n = b0 & 8 ? 4 : 3;
+                const uint32_t idx[4] = {in.u8(r + 0x14), in.u8(r + 0x15), in.u8(r + 0x16), in.u8(r + 0x17)};
+                size_t uv[4] = {}, tpage = r;  // tpage only read for semi-transparent prims, which always have UVs
+                if (!(b1 & 0x40)) {
+                    if (!uvTab) throw FormatError(std::format("{}: primitive at 0x{:x} needs the absent UV table", gname, r));
+                    const size_t e = size_t(uvTab) + in.u16(r + 0x1a);
+                    in.need(e, 12);
+                    uv[0] = e, uv[1] = e + 4, uv[2] = e + 8, uv[3] = e + 10, tpage = e + 6;
+                }
+                ++b.s.stats.worldFaces;
+                const bool reject = std::ranges::any_of(std::span(idx, size_t(n)), [&](uint32_t k) { return k < nv && rejected[k]; });
+                if (draw && !reject) b.prim(in, r, n, idx, b1 & 0x40 ? nullptr : uv, tpage, group, sortGroup, gname);
+                else {
+                    b.resolve(in.u16(r + 2) & 0xfff);  // counted like drawn faces (TEXTURE_GAP.md counts all trees)
+                    b.checkIndices(idx, n, gname, r);
+                    if (draw) ++b.s.stats.rejectedPrims;
+                    else ++b.lodFaces;
+                }
+            }
+        };
+        // Tree A always; tree B (alt) always; tree C (detail) is a far LOD that FUN_00406840 draws only beyond the
+        // near draw distance and FUN_00404f40 builds only when the DETAILS setting is < 2. At DETAILS 2 (FUN_00409840:
+        // near = far) tree A covers the whole range, so tree C is decoded and checked here but not drawn.
+        walk(0x18, 0x18, 0, true);
+        if (const uint32_t h = in.u32(0)) walk(size_t(h) + 0x18, size_t(h) + 0x18, 0, true);
+        if (const uint32_t h = in.u32(4)) walk(size_t(h) + 0x18, size_t(h) + 0x18, 0, false);
+    }
+
+    // Actor model (MODELS.md §10.2) with exactly one object: rest pose, transformed by xf.
+    void actor(std::span<const uint8_t> m, const Xform& xf, const std::string& gname) {
+        const In in{m, "actor model"};
+        const size_t ph = in.u32(4), vt = 8 + size_t(in.u32(8)), nv = in.u32(12);
+        in.need(vt, nv * 8);
+        verts.resize(nv);
+        for (size_t i = 0; i < nv; ++i) verts[i] = xf.apply(in.s16(vt + i * 8), in.s16(vt + i * 8 + 2), in.s16(vt + i * 8 + 4));
+        const size_t nC = in.u16(ph), nD = in.u16(ph + 2), nA = in.u8(ph + 4), nB = in.u8(ph + 5);
+        const size_t oB = in.u16(ph + 6), oC = in.u16(ph + 8), oD = in.u16(ph + 10);
+        const uint32_t group = nextGroup++;
+        const std::tuple<size_t, size_t, size_t, int> groups[] = {{0xc, nA, 0x24, 3}, {oB, nB, 0x24, 4}, {oC, nC, 0x28, 3}, {oD, nD, 0x28, 4}};
+        for (auto [off, cnt, size, n] : groups) {
+            in.need(ph + off, cnt * size);
+            for (size_t i = 0; i < cnt; ++i) {
+                const size_t r = ph + off + i * size;
+                const uint8_t b1 = in.u8(r + 1);
+                if (bool(b1 & 0x80) != (size == 0x28))  // u16 indices exactly in the 0x28-byte records
+                    throw FormatError(std::format("{}: primitive at 0x{:x}: index width flag does not match record size", gname, r));
+                uint32_t idx[4];
+                for (size_t k = 0; k < 4; ++k) idx[k] = b1 & 0x80 ? in.u16(r + 0x20 + 2 * k) : in.u8(r + 0x20 + k);
+                const size_t uv[4] = {r + 0x14, r + 0x18, r + 0x1c, r + 0x1e};
+                prim(in, r, n, idx, b1 & 0x40 ? nullptr : uv, r + 0x1a, group, group, gname);
+            }
+        }
+    }
+};
+
+std::span<const uint8_t> region(std::span<const uint8_t> sec, std::span<const uint8_t> offSize, uint32_t secId) {
+    const uint32_t off = le32(offSize, 0), size = le32(offSize, 4);
+    if (off > sec.size() || sec.size() - off < size)
+        throw FormatError(std::format("block 0x{:x}+0x{:x} outside section {} (0x{:x})", off, size, secId, sec.size()));
+    return sec.subspan(off, size);
+}
+
+// Chunk 0x22 tag 0x24 dispatch [TL]: (u32 @+0x18 & 0xffffff) == 0x1ffff -> octree, else actor format.
+bool isOctree(std::span<const uint8_t> m) { return m.size() >= 0x1c && (le32(m, 0x18) & 0xffffff) == 0x1ffff; }
+
+} // namespace
+
+std::span<const uint8_t> TbChunk::tag(uint8_t id) const {
+    for (const TbTag& t : tags)
+        if (t.id == id) return t.data;
+    return {};
+}
+
+TbScript parseTbScript(std::span<const uint8_t> d, uint32_t languageSection) {
+    const In in{d, "tb section 1"};
+    TbScript out;
+    size_t p = 0;
+    if (d.size() >= 2 && d[0] == 0x2c && d[1] == 0x44) {  // pseudo-chunk 2c (44 xx)* 2d (never in shipped data)
+        for (p = 1; in.u8(p) == 0x44; p += 2) {}
+        if (in.u8(p) != 0x2d) throw FormatError(std::format("tb section 1: pseudo-chunk byte 0x{:02x} at 0x{:x}", d[p], p));
+        ++p;
+    }
+    uint32_t section = 3;
+    bool pools = false;
+    for (;;) {
+        const uint8_t c = in.u8(p);
+        if (c == 0x2e) {
+            out.end = uint32_t(p);
+            return out;
+        }
+        if (c == 0x2b) {
+            if (!pools) throw FormatError(std::format("tb section 1: command 0x2b at 0x{:x} before pool sizes (0x3a/0x3d)", p));
+            section = 4, ++p;
+            continue;
+        }
+        if (c == 0x4a) {
+            section = languageSection, ++p;
+            continue;
+        }
+        if (c != 0x2c) throw FormatError(std::format("tb section 1: top-level byte 0x{:02x} at 0x{:x}", c, p));
+        TbChunk& ch = out.chunks.emplace_back();
+        ch.offset = uint32_t(p);
+        ch.type = in.u8(p + 1);
+        ch.section = section;
+        const Table* t = tagTable(ch.type);
+        if (!t) throw FormatError(std::format("tb section 1: chunk type 0x{:02x} at 0x{:x}", ch.type, p + 1));
+        for (p += 2;;) {
+            const uint8_t tag = in.u8(p);
+            if (tag == 0x2d) break;
+            const int n = (*t)[tag];
+            if (n < 0) throw FormatError(std::format("tb section 1: tag 0x{:02x} in chunk 0x{:02x} at 0x{:x}", tag, ch.type, p));
+            in.need(p + 1, size_t(n));
+            ch.tags.push_back({tag, uint32_t(p), d.subspan(p + 1, size_t(n))});
+            pools |= ch.type == 0x3a && tag == 0x3d;
+            p += 1 + size_t(n);
+        }
+        ++p;
+    }
+}
+
+void tbAdjustColor(uint8_t* rgb, double brightness) {
+    const double r = rgb[0] * 0.00392156862745098, g = rgb[1] * 0.00392156862745098, b = rgb[2] * 0.00392156862745098;
+    // 0x408270: I = sum/3, S = 1 - 3·min/sum, H = acos(...) in degrees (360 - H when g < b); grey -> H = S = 0.
+    const double sum = r + g + b, mn = std::min({r, g, b});
+    double h = 0.0, sat = 0.0, in = std::min(sum * (1.0 / 3.0), 1.0);
+    if (!(r == g && g == b)) {
+        sat = std::min(1.0 - 3.0 / sum * mn, 1.0);
+        const double c = std::clamp((r - g * 0.5 - b * 0.5) / std::sqrt((r - g) * (r - g) + (r - b) * (g - b)), -1.0, 1.0);
+        h = std::acos(c) * 57.29577951;
+        if (g < b) h = 360.0 - h;
+    }
+    in = std::min(in * brightness, 1.0);  // 0x407d30: × 0x639c20 (hue + 0x639c10, saturation × 0x639c18: identity)
+    // 0x407fe0: back to RGB per 120° sector (its two degree-to-radian constants), each channel clamped to 0..1.
+    double o[3] = {0.0, 0.0, 0.0};
+    if (in != 0.0 && sat == 0.0) o[0] = o[1] = o[2] = in;
+    else if (in != 0.0) {
+        const double f = in * 3.0, lo = (1.0 - sat) * (1.0 / 3.0);
+        const auto hi = [&](double a, double k) { return (std::cos(a * k) * sat / std::cos((60.0 - a) * k) + 1.0) * (1.0 / 3.0); };
+        if (h > 240.0) { const double gb = lo, bb = hi(h - 240.0, 0.017453293); o[0] = (1.0 - gb - bb) * f, o[1] = gb * f, o[2] = bb * f; }
+        else if (h > 120.0) { const double rr = lo, gg = hi(h - 120.0, 0.017453293); o[0] = rr * f, o[1] = gg * f, o[2] = (1.0 - rr - gg) * f; }
+        else { const double bb = lo, rr = hi(h, 0.01745329238474369); o[0] = rr * f, o[1] = (1.0 - rr - bb) * f, o[2] = bb * f; }
+    }
+    for (int k = 0; k < 3; ++k) rgb[k] = uint8_t(std::clamp(o[k], 0.0, 1.0) * 255.0);
+}
+
+static Scene buildTbSceneImpl(const BzeFile& bze, const std::string& level, double brightness,
+                              std::vector<TbPropMeshRange>* propMeshes, std::vector<std::vector<uint8_t>>* rawTextures) {
+    if (bze.variant != BzeVariant::TimeBusters) throw FormatError("buildTbScene: not a Time Busters BZE");
+    const int i1 = bze.find(1);
+    if (i1 < 0) throw FormatError("buildTbScene: no section 1");
+    const std::vector<uint8_t> s1 = bze.payload(size_t(i1));
+    const TbScript script = parseTbScript(s1);
+    std::map<uint32_t, std::vector<uint8_t>> secs;
+    const auto section = [&](uint32_t id) -> std::span<const uint8_t> {
+        auto [it, fresh] = secs.try_emplace(id);
+        if (fresh) {
+            const int i = bze.find(id);
+            if (i < 0) throw FormatError(std::format("buildTbScene: section {} referenced but absent", id));
+            it->second = bze.payload(size_t(i));
+        }
+        return it->second;
+    };
+
+    if (rawTextures) rawTextures->clear();
+    Scene s;
+    s.game = GameId::TimeBusters;
+    s.level = level;
+    // Inferred: PS1 modulation (texel * colour / 128) as LiT; vertex colours centre near 128 in the data (Enhanced).
+    // The PC GL path does not double (byte/255; Original Fidelity uses 1.0): measured gain original/bbtime 1.01-1.03
+    // on ARCA01 (RUNTIME_REFERENCE.md §7). Its texel tables 0x639de0/0x63ae80 (on: 0x639da4 = 1) are identity at
+    // runtime, so pcTexGamma stays 1; the CLUT colours get the brightness pass below (tbAdjustColor).
+    s.colorScale = 255.0f / 128.0f;
+    Builder b{s, {}, {}, {}, {}, 0, false, 0, {}};
+    for (const TbChunk& ch : script.chunks)  // far clip 0x4d5980: chunk 0x3a tag 0x3c u16 @2
+        if (const auto p = ch.tag(0x3c); ch.type == 0x3a && p.size() >= 4) s.tbFarClip = le16(p, 2);
+
+    std::vector<std::string> texErrors;
+    for (const TbChunk& ch : script.chunks) {
+        if (ch.type != 0x28) continue;
+        for (const TbTag& t : ch.tags) {
+            const uint32_t off = le32(t.data, 0), id = le32(t.data, 4) & 0xfff;  // high 20 bits = byte size
+            ++s.stats.textureRefs;
+            try {
+                Texture tx = decodeTimeBustersTim(section(ch.section), off, std::format("{}/tex/{}", level, id));
+                std::vector<uint8_t> raw;
+                if ((In{section(ch.section), "tim"}.u32(off + 4) & 7) < 2) {  // CLUT TIM: adjust each palette colour once
+                    if (rawTextures) raw = tx.rgba;
+                    std::map<uint32_t, std::array<uint8_t, 3>> done;
+                    for (size_t i = 0; i < tx.rgba.size(); i += 4) {
+                        uint8_t* p = &tx.rgba[i];
+                        auto [it, fresh] = done.try_emplace(uint32_t(p[0] | p[1] << 8 | p[2] << 16));
+                        if (fresh) it->second = {p[0], p[1], p[2]}, tbAdjustColor(it->second.data(), brightness);
+                        std::copy_n(it->second.begin(), 3, p);
+                    }
+                }
+                if (b.tex.try_emplace(id, int32_t(s.textures.size())).second) {
+                    if (rawTextures) {
+                        if (raw == tx.rgba) raw.clear();
+                        rawTextures->push_back(std::move(raw));
+                    }
+                    s.textures.push_back(std::move(tx));
+                }
+            } catch (const FormatError& e) {
+                ++s.stats.textureErrors;
+                texErrors.push_back(std::format("texture {}: {}", id, e.what()));
+            }
+        }
+    }
+
+    // Chunk 0x22 assets by asset id (tag 0x27: u16 class @0, u16 asset id @2 = key of entity tag 0x0f): tag 0x24
+    // models, and tag 0x3f sprite sequences (MODELS.md §10.3: nD 16-byte 0x64 records at block + 0xc, tex id @+10).
+    struct Asset { std::span<const uint8_t> model; bool octree; bool placed = false; };
+    struct Sprite { uint16_t cls; std::vector<uint32_t> ids; };
+    std::vector<Asset> models;
+    std::map<uint16_t, size_t> assetModel;
+    std::map<uint16_t, std::pair<uint16_t, std::span<const uint8_t>>> tods;  // asset id -> class, tag 0x25 TOD
+    std::map<uint16_t, Sprite> sprites;
+    for (const TbChunk& ch : script.chunks) {
+        if (ch.type != 0x22) continue;
+        const auto id = ch.tag(0x27);
+        if (const auto tod = ch.tag(0x25); !tod.empty() && !id.empty())
+            tods[le16(id, 2)] = {le16(id, 0), region(section(ch.section), tod, ch.section)};
+        if (const auto seq = ch.tag(0x3f); !seq.empty() && !id.empty()) {
+            const In in{region(section(ch.section), seq, ch.section), "sprite sequence"};
+            const size_t ph = in.u32(4), nd = in.u16(ph + 2);
+            Sprite& sp = sprites[le16(id, 2)] = {le16(id, 0), {}};
+            for (size_t i = 0; i < nd; ++i) {
+                if (in.u8(ph + 0xc + 16 * i + 3) != 0x64)
+                    throw FormatError(std::format("sprite sequence record {} at 0x{:x}: type is not 0x64", i, ph + 0xc + 16 * i));
+                sp.ids.push_back(in.u16(ph + 0xc + 16 * i + 10) & 0xfff);
+                if (sp.cls != 0x17) continue;
+                // Effect sprites (particles 0x453350): the whole texture; record flags @2 & 8 = semi-transparent with
+                // the tpage ABR @6 bits 5-6 (0x41c660 draws it with that ABR), else colour-keyed.
+                SpriteFrame f;
+                const auto tx = b.tex.find(sp.ids.back());
+                f.texture = tx == b.tex.end() ? -1 : tx->second;
+                if (in.u8(ph + 0xc + 16 * i + 2) & 8) {
+                    constexpr Blend kAbr[4] = {Blend::Alpha, Blend::Additive, Blend::Subtract, Blend::Additive};
+                    constexpr uint8_t kAlpha[4] = {128, 255, 255, 64};
+                    const uint32_t abr = (in.u16(ph + 0xc + 16 * i + 6) >> 5) & 3;
+                    f.blend = f.pcBlend = kAbr[abr], f.alpha = f.pcAlpha = kAlpha[abr];
+                } else {
+                    f.blend = f.pcBlend = Blend::AlphaTest;
+                }
+                s.sprites[le16(id, 2)].push_back(f);
+            }
+        }
+        const auto mdl = ch.tag(0x24);
+        if (mdl.empty()) continue;
+        const auto m = region(section(ch.section), mdl, ch.section);
+        models.push_back({m, isOctree(m)});
+        s.stats.skyDomes += models.back().octree;
+        if (!id.empty()) assetModel[le16(id, 2)] = models.size() - 1;
+    }
+    // Overlay font (0x4660c0: template 0x18) and HUD sheet (0x462430: template 0x1f): the template's first linked
+    // class-0x17 sprite sequence, one whole TIM per record (u, v 0; w, h = TIM size in all 49 levels' data).
+    for (const TbChunk& ch : script.chunks) {
+        const auto id = ch.tag(0x27);
+        if (ch.type != 0x08 || id.empty() || (le16(id, 0) != 0x18 && le16(id, 0) != 0x1f)) continue;
+        std::vector<int32_t>& out = le16(id, 0) == 0x18 ? s.overlayFont : s.hudSheet;
+        for (const TbTag& t : ch.tags) {
+            const auto sp = t.id == 0x0f ? sprites.find(le16(t.data, 0)) : sprites.end();
+            if (sp == sprites.end() || sp->second.cls != 0x17 || !out.empty()) continue;
+            for (const uint32_t tid : sp->second.ids) {
+                const auto tx = b.tex.find(tid);
+                out.push_back(tx == b.tex.end() ? -1 : tx->second);
+            }
+        }
+    }
+
+    // Texture links (TEXTURE_GAP.md): entity tag 0x0b {u16 link id, 0} makes the entity write its current sprite
+    // frame's texture id into alias[link id] at run time (FUN_00408410 at load, FUN_00465c80 per frame).
+    // Frames: type 20 (tag 0x13) = looping flipbook FUN_00453d00 over the first listed asset of class 0x17; start
+    // frame u16 +0x68, hold byte +0x6c, both from tag 0x41 (the only writer on link entities in the data); the frame
+    // advances when the hold counter runs out, i.e. every hold+1 ticks, never when hold = 0; wraps after the last
+    // record. Type 2 (0x4599e0, state driven) and others: the latest kind-0x100 asset before tag 0x0b; a running
+    // world writes the type-2 alias (TbWorld::textureLinks), records maps it to a texture.
+    uint32_t linkFrameErrors = 0;
+    for (const TbChunk& ch : script.chunks) {
+        if (ch.type != 0x07 && ch.type != 0x08 && ch.type != 0x0a && ch.type != 0x63) continue;
+        const auto cls = ch.tag(0x13);
+        const int type = cls.empty() ? -1 : cls[0];
+        const Sprite* last = nullptr;
+        for (const TbTag& t : ch.tags) {
+            if (t.id == 0x0f) {
+                if (auto it = sprites.find(le16(t.data, 0)); it != sprites.end()) last = &it->second;
+                continue;
+            }
+            if (t.id != 0x0b || !last) continue;
+            const Sprite* src = last;
+            if (type == 20) {
+                src = nullptr;
+                for (const TbTag& a : ch.tags) {
+                    if (a.id != 0x0f) continue;
+                    if (auto it = sprites.find(le16(a.data, 0)); it != sprites.end() && it->second.cls == 0x17) {
+                        src = &it->second;
+                        break;
+                    }
+                }
+                if (!src) continue;  // the original dereferences a null asset here
+            }
+            TextureAnim an;
+            an.linkId = le16(t.data, 0);
+            for (uint32_t fid : src->ids)
+                if (auto it = b.tex.find(fid); it != b.tex.end()) an.frames.push_back(it->second);
+                else ++linkFrameErrors;
+            if (an.frames.empty()) continue;
+            if (const auto p = ch.tag(0x41); type == 20 && !p.empty()) {
+                an.startFrame = le16(p, 0) % an.frames.size();
+                an.holdTicks = p[4] ? p[4] + 1u : UINT32_MAX;
+            } else {
+                an.holdTicks = 2;  // without a running world (viewer): cycled in record order, 2 ticks per frame (Inferred)
+                an.timingInferred = true;
+            }
+            if (type == 2) {  // TbWorld::textureLinks holds the 0x465c80 alias = texture id: records maps it (12 bits)
+                an.records.assign(0x1000, -1);
+                for (const auto& [id, ix] : b.tex)
+                    if (id < 0x1000) an.records[id] = ix;
+            }
+            if (auto [it, fresh] = b.links.try_emplace(an.linkId, int32_t(s.textureAnims.size())); fresh) s.textureAnims.push_back(std::move(an));
+            else s.textureAnims[size_t(it->second)] = std::move(an);  // several writers: the last entity wins (Inferred)
+        }
+    }
+
+    std::string players;
+    for (const TbChunk& ch : script.chunks) {
+        if (ch.type == 0x20) {  // world model: v * scale + translation; rotation identity in all data
+            const auto mdl = ch.tag(0x24);
+            if (mdl.empty()) continue;
+            if (const auto r = ch.tag(0x11); !r.empty())
+                for (size_t k = 0; k < 3; ++k)
+                    if (le16(r, 2 * k) % 0x1000)
+                        throw FormatError(std::format("world chunk at 0x{:x}: non-identity rotation unsupported", ch.offset));
+            Xform xf;
+            if (const auto sc = ch.tag(0x12); !sc.empty()) xf.s[0] = xf.s[1] = xf.s[2] = float(le16(sc, 0)) / 4096.0f;  // u16 X for all axes
+            if (const auto t = ch.tag(0x10); !t.empty()) std::ranges::copy(lowHalves(t), xf.t);
+            ++s.stats.worldModels;
+            b.world = true;
+            const size_t first = s.meshes.size();
+            b.octree(region(section(ch.section), mdl, ch.section), xf, std::format("world{}", s.stats.worldModels));
+            const auto zone_tag = ch.tag(0x21);
+            if (zone_tag.size() >= 2) {
+                const uint16_t zone = le16(zone_tag, 0);
+                if (zone > 0 && zone < 50)
+                    for (Mesh& mesh : s.meshes | std::views::drop(first)) mesh.zone = zone;
+            }
+            b.world = false;
+            continue;
+        }
+        if (ch.type != 0x07 && ch.type != 0x0a && ch.type != 0x63) continue;  // placed instances (08 = templates)
+        const auto pos = ch.tag(0x10);
+        if (pos.empty()) continue;
+        const Vec3 p = lowHalves(pos);
+        const auto rot = ch.tag(0x11);
+        const float yaw = rot.empty() ? 0.0f : angle(int16_t(le16(rot, 2)));
+        if (const auto id = ch.tag(0x27); !id.empty() && (le16(id, 0) == 2 || le16(id, 0) == 3)) {
+            const bool bugs = le16(id, 0) == 2;
+            if (bugs && !s.spawn) {
+                s.spawn = std::array<float, 3>{p[0], -p[1], -p[2]};
+                s.spawnYaw = -yaw;  // PS1 Ry forward (sin, 0, cos) -> engine Camera yaw = -angle (Inferred, as LiT)
+            }
+            players += std::format("{}{} (id {}) at ({}, {}, {})", players.empty() ? "" : ", ", bugs ? "Bugs" : "Taz",
+                                   le16(id, 0), p[0], p[1], p[2]);
+        }
+        // Placement rule as LiT (Inferred): an instance listing exactly one model asset (tag 0x0f) is drawn at its
+        // position with rotation Y (tag 0x11) and per-axis scale (tag 0x12, 4.12). Octree models (sky domes) are
+        // held by class-9 entities whose init FUN_0044d6f0 builds the octree and forces scale 1 (+0xec..+0xf0 = 0x1000).
+        Asset* model = nullptr;
+        int statics = 0;
+        for (const TbTag& t : ch.tags)
+            if (t.id == 0x0f)
+                if (auto a = assetModel.find(le16(t.data, 0)); a != assetModel.end()) ++statics, model = &models[a->second];
+        if (statics != 1) continue;
+        Xform xf;
+        std::ranges::copy(p, xf.t);
+        xf.cy = std::cos(yaw), xf.sy = std::sin(yaw);
+        if (model->octree) {
+            // The class-9 draw 0x465710 overwrites the entity position with the view eye every frame (tag 0x10 is
+            // never used) and lifts the matrix by +0x76 (tag 0x39 s16 @2, PS1 y): built here in eye space,
+            // drawn at the eye (Scene::skyMeshes). View flags +0x6e (tag 0x39 @0) 0x20: the view list 0x45eee0
+            // never lists the entity, so it is never drawn (VIR01's second dome, lift 5000).
+            // 0x465710 composes the matrix (0x405820) from the coordinate of the entity's FIRST draw item and draws
+            // the model of the later LOD item without that item's own coordinate, so the dome sits at the first
+            // part's offset. The parts: the class-1 skeleton's frame 0, then the class-0xb animation the init
+            // 0x44d6f0 plays (0x469770, class 0xb). VICASG04 / VIR01: part 1 (no object) at (0, 6000, 0), part 2
+            // (the dome) at (0, -6000, 0) under it, so the exe draws the dome 6000 lower than its rig places it
+            // (oracle peeks local/w13/sky/peek_*.txt; ARCA01 / VIQ02 have no offset).
+            model->placed = true;
+            const auto lift = ch.tag(0x39);
+            xf.t[0] = xf.t[2] = 0.0f;
+            xf.t[1] = lift.size() >= 4 ? float(int16_t(le16(lift, 2))) : 0.0f;
+            AnimState st;
+            for (const int cls : {1, 0xb})
+                for (const TbTag& t : ch.tags)
+                    if (const auto a = t.id == 0x0f ? tods.find(le16(t.data, 0)) : tods.end(); a != tods.end() && a->second.first == cls) {
+                        const Tod tod = parseTbTod(a->second.second);
+                        applyTbFrame(st, tod, 0);
+                        if (tod.frames() > 1)  // VIQ02's class-0xb animation has 2 frames (VICASG04 / VIR01 / ARCA01: 1)
+                            s.notes.push_back(std::format("sky dome at 0x{:x}: {}-frame class-{} animation, frame 0 only", ch.offset, tod.frames(), cls));
+                        break;
+                    }
+            std::array<float, 9> partM{1, 0, 0, 0, 1, 0, 0, 0, 1};
+            if (!st.parts.empty()) {
+                const TodPart& p0 = st.parts.front();
+                partM = p0.m;
+                const float x = float(p0.trans[0]), y = float(p0.trans[1]), z = float(p0.trans[2]);
+                xf.t[0] += xf.cy * x + xf.sy * z, xf.t[1] += y, xf.t[2] += -xf.sy * x + xf.cy * z;
+            }
+            const size_t first = s.meshes.size();
+            b.octree(model->model, xf, std::format("sky{}", ch.offset));
+            // The first part's rotation (AZCASG05 / AZQ01 domes) inside the entity yaw: p = R_e R_p v + t, PS1 axes
+            // (engine (x, -y, -z)); the built vertices hold R_e v + t, so R_e R_p R_e^T is applied about t.
+            if (partM != std::array<float, 9>{1, 0, 0, 0, 1, 0, 0, 0, 1})
+                for (Mesh& m : s.meshes | std::views::drop(first))
+                    for (Vertex& v : m.vertices) {
+                        const float qx = v.pos[0] - xf.t[0], qy = -v.pos[1] - xf.t[1], qz = -v.pos[2] - xf.t[2];
+                        const float ux = xf.cy * qx - xf.sy * qz, uz = xf.sy * qx + xf.cy * qz;  // R_e^T
+                        const float rx = partM[0] * ux + partM[1] * qy + partM[2] * uz;
+                        const float ry = partM[3] * ux + partM[4] * qy + partM[5] * uz;
+                        const float rz = partM[6] * ux + partM[7] * qy + partM[8] * uz;
+                        v.pos[0] = xf.cy * rx + xf.sy * rz + xf.t[0];
+                        v.pos[1] = -(ry + xf.t[1]);
+                        v.pos[2] = -(-xf.sy * rx + xf.cy * rz + xf.t[2]);
+                    }
+            if (lift.size() >= 2 && (le16(lift, 0) & 0x20)) {  // decoded (validated, counted in worldFaces), not drawn
+                for (const Mesh& m : s.meshes | std::views::drop(first)) s.stats.triangles -= m.indices.size() / 3;
+                s.meshes.resize(first);
+                continue;
+            }
+            // Far clip 64000 with entity flags (tag 0x16 @4, +0xc) 0x2000000, else the level's (Mesh::farClip).
+            const auto fl = ch.tag(0x16);
+            const float farClip = fl.size() >= 8 && (le32(fl, 4) & 0x2000000) ? 64000.0f : 0.0f;
+            for (Mesh& m : s.meshes | std::views::drop(first)) m.background = true, m.farClip = farClip;
+            std::ranges::move(s.meshes.begin() + ptrdiff_t(first), s.meshes.end(), std::back_inserter(s.skyMeshes));
+            s.meshes.resize(first);
+            continue;
+        }
+        const uint16_t nobj = In{model->model, "actor model"}.u16(2);
+        if (nobj != 1) {
+            s.stats.skippedActors += nobj > 1;  // nobj 0 = no geometry
+            continue;
+        }
+        if (const auto sc = ch.tag(0x12); !sc.empty())
+            for (size_t k = 0; k < 3; ++k) xf.s[k] = float(int16_t(le16(sc, 4 * k))) / 4096.0f;
+        ++s.stats.props;
+        const size_t first = s.meshes.size();
+        b.actor(model->model, xf, std::format("prop{}@{:x}", s.stats.props, ch.offset));
+        if (propMeshes && s.meshes.size() > first)
+            propMeshes->push_back({ch.offset, first, s.meshes.size()});
+    }
+    // Model assets without a placed entity do not enter the original draw list.
+    const auto unplaced = std::ranges::count_if(models, [](const Asset& a) { return a.octree && !a.placed; });
+
+    s.stats.missingTextureIds.assign(b.missing.begin(), b.missing.end());
+    s.notes.push_back(std::format("{} world models, {} octree sky assets ({} without a placed entity, excluded from runtime geometry), "
+                                  "{} rigid props (placement Inferred), {} skinned actors skipped (Research Required)",
+                                  s.stats.worldModels, s.stats.skyDomes, unplaced, s.stats.props, s.stats.skippedActors));
+    if (!players.empty()) s.notes.push_back("Players (identity Inferred): " + players);
+    if (s.stats.invalidPrims) s.notes.push_back(std::format("{} primitives fail CheckPrimValidity: skipped as in the game", s.stats.invalidPrims));
+    if (s.stats.rejectedPrims) s.notes.push_back(std::format("{} primitives use a vertex beyond model x/y +-32000: skipped as in the game (0x408990)", s.stats.rejectedPrims));
+    if (b.lodFaces) s.notes.push_back(std::format("{} far-LOD faces (octree tree C, DETAILS < 2 only) decoded, not drawn", b.lodFaces));
+    if (!s.textureAnims.empty())
+        s.notes.push_back(std::format("{} texture links (animated, TEXTURE_GAP.md) drive {} faces{}", s.textureAnims.size(),
+                                      s.stats.linkedFaces,
+                                      linkFrameErrors ? std::format("; {} link frames have no TIM", linkFrameErrors) : ""));
+    if (s.stats.missingTextureFaces)
+        s.notes.push_back(std::format("{} faces reference {} texture ids that are neither TIMs nor links: not drawn (as the "
+                                      "original)", s.stats.missingTextureFaces, s.stats.missingTextureIds.size()));
+    for (const std::string& e : texErrors) s.notes.push_back(e);
+    return s;
+}
+
+Scene buildTbScene(const BzeFile& bze, const std::string& level, double brightness) {
+    return buildTbSceneImpl(bze, level, brightness, nullptr, nullptr);
+}
+
+Scene buildTbScene(const BzeFile& bze, const std::string& level, double brightness,
+                   std::vector<TbPropMeshRange>& propMeshes, std::vector<std::vector<uint8_t>>* rawTextures) {
+    std::vector<TbPropMeshRange> ranges;
+    Scene scene = buildTbSceneImpl(bze, level, brightness, &ranges, rawTextures);
+    propMeshes = std::move(ranges);
+    return scene;
+}
+
+} // namespace bb

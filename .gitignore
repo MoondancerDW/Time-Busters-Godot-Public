@@ -1,0 +1,7 @@
+.godot/
+__pycache__/
+*.pyc
+*.o
+*.obj
+*.dll
+*.a

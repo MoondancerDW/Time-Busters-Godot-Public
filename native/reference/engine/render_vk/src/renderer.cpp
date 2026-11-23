@@ -1,0 +1,3399 @@
+#include "bb/render_vk/renderer.h"
+#include "bb/render/pc_order.h"
+
+#include "fsr.h"
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <bit>
+#include <cstdlib>
+#include <cstring>
+#include <format>
+#include <glm/gtc/packing.hpp>
+#include <numbers>
+#include <limits>
+#include <map>
+#include <fstream>
+#include <print>
+#include <ranges>
+#include <tuple>
+#include <chrono>
+#include <span>
+#include <stdexcept>
+
+namespace bb::render_vk {
+namespace fs = std::filesystem;
+namespace {
+
+// SPIR-V compiled at build time by glslc (-mfmt=num), see CMakeLists.txt.
+constexpr uint32_t kSceneVert[] = {
+#include "scene.vert.inc"
+};
+constexpr uint32_t kSceneFrag[] = {
+#include "scene.frag.inc"
+};
+constexpr uint32_t kSceneLitVert[] = {
+#include "scene_lit.vert.inc"
+};
+constexpr uint32_t kSceneMapFrag[] = {
+#include "scene_map.frag.inc"
+};
+constexpr uint32_t kSceneRtFrag[] = {
+#include "scene_rt.frag.inc"
+};
+constexpr uint32_t kSceneMvVert[] = {
+#include "scene_mv.vert.inc"
+};
+constexpr uint32_t kSceneMvFrag[] = {
+#include "scene_mv.frag.inc"
+};
+constexpr uint32_t kSceneMapMvFrag[] = {
+#include "scene_map_mv.frag.inc"
+};
+constexpr uint32_t kSceneRtMvFrag[] = {
+#include "scene_rt_mv.frag.inc"
+};
+constexpr uint32_t kShadowVert[] = {
+#include "shadow.vert.inc"
+};
+constexpr uint32_t kShadowFrag[] = {
+#include "shadow.frag.inc"
+};
+constexpr uint32_t kUiVert[] = {
+#include "ui.vert.inc"
+};
+constexpr uint32_t kUiFrag[] = {
+#include "ui.frag.inc"
+};
+
+constexpr uint32_t kFrames = 2;
+constexpr uint32_t kNoSlot = UINT32_MAX;
+// Depth attachments, the shadow map and the water's sampled depth copy: D32 float, else 24-bit depth (Vulkan requires
+// one of the two as a depth attachment); chosen per device in init (depthFormat_).
+constexpr VkFormatFeatureFlags kDepthFeatures = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                                VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+constexpr VkFormat kTexFormat = VK_FORMAT_R8G8B8A8_UNORM;
+constexpr VkBufferUsageFlags kStreamUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT; // + the Enhanced water's wave heights
+// Extra usage for buffers that feed acceleration-structure builds and scene.frag's buffer references.
+constexpr VkBufferUsageFlags kRtInput = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+constexpr VkShaderStageFlags kPushStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+enum : uint32_t { kSampNearest, kSampTrilinear, kSampUiNearest, kSampUiLinear, kSampLinear };
+enum : uint32_t { kSlotWhite, kSlotFont }; // first two images created in init()
+
+// Matches the push block in scene.vert/scene.frag.
+struct Push3D {
+    glm::mat4 viewProj;
+    glm::vec4 viewZ, fogColorScale;
+    glm::vec2 fog;
+    float alphaRef;
+    uint32_t flags, tex, samp;
+    float texGamma;     // Settings::texGamma (1 = off)
+    uint32_t material;  // lit variants only: GpuMesh::material
+};
+static_assert(sizeof(Push3D) == 128 && offsetof(Push3D, alphaRef) == 104);
+
+// Enhanced sun shadows (docs/ROADMAP.md "Ray tracing"). Neither exe has a dynamic light (LiT draws blob shadows, TB
+// none), so there is no original to port: the sun is placed per level by this rule: 55° high, behind the level's
+// opening camera (its yaw at the first drawScene after uploadScene) and 35° to its right, so the opening view is
+// front-lit and shadows fall away from the camera, short and readable under the characters.
+constexpr float kSunElevation = 0.96f, kSunSide = 0.6f; // radians
+constexpr float kShadowBrightness = 0.55f; // shadowed surfaces keep 55% of their (baked, vertex-lit) colour
+// Bugs-scale objects are a few hundred units tall (MODELS.md §3, both games); the effect sizes follow that unit.
+constexpr float kCharUnit = 300.0f;
+constexpr float kCascadeEnd[4] = {7 * kCharUnit, 25 * kCharUnit, 80 * kCharUnit, 250 * kCharUnit}; // view distance
+constexpr uint32_t kCascades = 4, kShadowSize = 2048;
+constexpr float kAoRadius = 0.7f * kCharUnit, kAoStrength = 0.65f;
+constexpr float kRayOffset = 1e-3f; // shadow / AO ray origin pushed off the surface by this × view distance (+0.5)
+// Rays ignore hits closer than this: the PS1 levels stack decal polygons (tracks, patches) a few units over the
+// ground, which would otherwise shadow the ground under them. Costs contact shadows of objects thinner than ~10 units.
+constexpr float kRayMin = 0.03f * kCharUnit;
+
+// set 1 binding 0, std140 (scene.frag Light).
+struct LightUbo {
+    glm::mat4 cascade[4];
+    glm::vec4 splits, texel, sun, eye, rt;
+    uint32_t mode;
+    float rayMin;
+    uint32_t reflect, temporal;
+    glm::mat4 curViewProj, prevViewProj; // motion vectors (FSR): unjittered
+    // Enhanced water (scene.frag shadeWater): render-target uv + depth -> world (this frame's jittered projection);
+    // wave field xy origin, z 1/(cell·N), w cell (0 = none); water x animation seconds, yz 1 / render-target size;
+    // bindless slots of the opaque colour copy, its depth, the wave heights and the normal map.
+    glm::mat4 invViewProj;
+    glm::vec4 waves, water;
+    glm::uvec4 waterSlots;
+    glm::vec4 under;  // Enhanced underwater: x underwater() 0..1, y the surface height over the eye, z seconds
+};
+static_assert(sizeof(LightUbo) == 608);
+
+// Smooth normals: faces meeting at a welded position are averaged (weighted by their corner angle) when they are
+// within this angle of each other, so rounded models shade smoothly while box edges and creases stay hard.
+const float kCreaseCos = std::cos(55.0f * std::numbers::pi_v<float> / 180.0f);
+constexpr float kWeldGrid = 0.25f; // positions closer than this snap together (decoders keep game-unit coordinates)
+
+// Per-vertex smooth normals of verts (triangles idx[first, first + count) offset by base, per range), packed as
+// R8G8B8A8_SNORM. Vertices of no triangle get 0 (the shaders then use the face normal), as every vertex does with
+// BBTIME_VK_FLAT_NORMALS=1 (before/after comparisons).
+struct TriRange { uint32_t first, count; int32_t base; };
+std::vector<uint32_t> smoothNormals(std::span<const Vertex> verts, std::span<const uint32_t> idx, std::span<const TriRange> ranges) {
+    static const bool flat = [] { const char* e = std::getenv("BBTIME_VK_FLAT_NORMALS"); return e && *e && *e != '0'; }();
+    if (flat) return std::vector<uint32_t>(verts.size(), 0); // comparison / debugging: face normals everywhere
+    struct Corner { uint64_t key; uint32_t tri, vert; };
+    std::vector<glm::vec3> faceN;
+    std::vector<Corner> corners;
+    std::vector<float> angle;
+    auto pos = [&](uint32_t v) { return glm::vec3(verts[v].pos[0], verts[v].pos[1], verts[v].pos[2]); };
+    auto key = [](glm::vec3 p) {
+        const auto q = [](float f) { return uint64_t(uint32_t(int32_t(std::lround(f / kWeldGrid))) & 0x1fffff); };
+        return q(p.x) | q(p.y) << 21 | q(p.z) << 42;
+    };
+    for (const TriRange& r : ranges)
+        for (uint32_t i = r.first; i + 2 < r.first + r.count; i += 3) {
+            const uint32_t v[3] = {uint32_t(int32_t(idx[i]) + r.base), uint32_t(int32_t(idx[i + 1]) + r.base), uint32_t(int32_t(idx[i + 2]) + r.base)};
+            const glm::vec3 p[3] = {pos(v[0]), pos(v[1]), pos(v[2])};
+            const glm::vec3 n = glm::cross(p[1] - p[0], p[2] - p[0]);
+            const float len = glm::length(n);
+            if (!(len > 1e-6f)) continue;
+            const uint32_t tri = uint32_t(faceN.size());
+            faceN.push_back(n / len);
+            for (int k = 0; k < 3; ++k) {
+                const glm::vec3 a = glm::normalize(p[(k + 1) % 3] - p[k]), b = glm::normalize(p[(k + 2) % 3] - p[k]);
+                angle.push_back(std::acos(std::clamp(glm::dot(a, b), -1.0f, 1.0f)));
+                corners.push_back({key(p[k]), tri, v[k]});
+            }
+        }
+    std::vector<uint32_t> order(corners.size());
+    for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::ranges::sort(order, {}, [&](uint32_t c) { return corners[c].key; });
+    std::vector<glm::vec3> acc(verts.size(), glm::vec3(0.0f));
+    for (size_t g = 0; g < order.size();) {
+        size_t e = g + 1;
+        while (e < order.size() && corners[order[e]].key == corners[order[g]].key) ++e;
+        for (size_t i = g; i < e; ++i) {
+            const glm::vec3 nc = faceN[corners[order[i]].tri];
+            glm::vec3 sum(0.0f);
+            for (size_t j = g; j < e; ++j) {
+                const glm::vec3 nd = faceN[corners[order[j]].tri];
+                if (glm::dot(nd, nc) >= kCreaseCos) sum += angle[order[j]] * nd;
+            }
+            acc[corners[order[i]].vert] += glm::normalize(sum);
+        }
+        g = e;
+    }
+    std::vector<uint32_t> out(verts.size(), 0);
+    for (size_t v = 0; v < acc.size(); ++v) {
+        const float len = glm::length(acc[v]);
+        if (len > 1e-6f) out[v] = glm::packSnorm4x8(glm::vec4(acc[v] / len, 0.0f));
+    }
+    return out;
+}
+
+
+void check(VkResult r, const char* what) {
+    if (r != VK_SUCCESS) throw std::runtime_error(std::format("{} failed (VkResult {})", what, int(r)));
+}
+
+void imageBarrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, uint32_t mip, uint32_t mips,
+                  VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                  VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess, uint32_t layers = 1) {
+    VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    b.srcStageMask = srcStage;
+    b.srcAccessMask = srcAccess;
+    b.dstStageMask = dstStage;
+    b.dstAccessMask = dstAccess;
+    b.oldLayout = from;
+    b.newLayout = to;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = img;
+    b.subresourceRange = {aspect, mip, mips, 0, layers};
+    VkDependencyInfo d{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    d.imageMemoryBarrierCount = 1;
+    d.pImageMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cb, &d);
+}
+
+void memoryBarrier(VkCommandBuffer cb, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                   VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) {
+    VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    b.srcStageMask = srcStage;
+    b.srcAccessMask = srcAccess;
+    b.dstStageMask = dstStage;
+    b.dstAccessMask = dstAccess;
+    VkDependencyInfo d{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    d.memoryBarrierCount = 1;
+    d.pMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cb, &d);
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL onDebug(VkDebugUtilsMessageSeverityFlagBitsEXT sev, VkDebugUtilsMessageTypeFlagsEXT type,
+                                       const VkDebugUtilsMessengerCallbackDataEXT* data, void* user) {
+    if (type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) {
+        ++*static_cast<uint32_t*>(user);
+        std::println(stderr, "VK-VALIDATION [{}] {}", sev >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : "warning",
+                     data->pMessage);
+    } else {
+        std::println(stderr, "vk: {}", data->pMessage); // loader / third-party layer chatter, not counted
+    }
+    return VK_FALSE;
+}
+
+fs::path cacheDir() {
+    if (const char* x = std::getenv("XDG_CACHE_HOME"); x && *x) return fs::path(x) / "bbtime";
+    const char* home = std::getenv("HOME");
+    return fs::path(home ? home : ".") / ".cache/bbtime";
+}
+
+const char* vendorName(uint32_t id) {
+    switch (id) {
+    case 0x1002: return "AMD";
+    case 0x10DE: return "NVIDIA";
+    case 0x8086: return "Intel";
+    case 0x10005: return "Mesa";
+    default: return "unknown vendor";
+    }
+}
+
+// Enhanced water's tiling normal map (scene.frag shadeWater's two scrolling layers): rgb = tangent normal (z up), a =
+// height, from 24 sine ripples with whole cycles per tile (seamless) in fixed pseudo-random directions; amplitude ∝
+// 1/wavenumber, so every ripple tilts the surface alike (~0.35 rms slope in total).
+Texture waterNormalMap() {
+    constexpr uint32_t N = 256, kWaves = 24;
+    struct Wave { float kx, ky, amp, phase; };
+    std::array<Wave, kWaves> waves{};
+    uint32_t seed = 0x9e3779b9u;
+    auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return float(seed >> 8) / float(1u << 24); };
+    for (Wave& w : waves) {
+        int kx = 0, ky = 0;
+        while (kx == 0 && ky == 0) {
+            const float a = rnd() * 6.2831853f, k = 3.0f + 17.0f * rnd() * rnd();
+            kx = int(std::lround(k * std::cos(a))), ky = int(std::lround(k * std::sin(a)));
+        }
+        w = {float(kx), float(ky), 0.1f * float(N) / (6.2831853f * std::hypot(float(kx), float(ky))), rnd() * 6.2831853f};
+    }
+    std::vector<glm::vec3> hg(N * N); // height, d/dx, d/dy (texels)
+    float lo = 1e9f, hi = -1e9f;
+    for (uint32_t y = 0; y < N; ++y)
+        for (uint32_t x = 0; x < N; ++x) {
+            glm::vec3 s(0.0f);
+            for (const Wave& w : waves) {
+                const float a = 6.2831853f * (w.kx * float(x) + w.ky * float(y)) / float(N) + w.phase, c = 6.2831853f / float(N) * w.amp * std::cos(a);
+                s += glm::vec3(w.amp * std::sin(a), c * w.kx, c * w.ky);
+            }
+            hg[y * N + x] = s;
+            lo = std::min(lo, s.x), hi = std::max(hi, s.x);
+        }
+    Texture t{.name = "water_normal", .width = N, .height = N};
+    t.rgba.resize(size_t(N) * N * 4);
+    for (size_t i = 0; i < hg.size(); ++i) {
+        const glm::vec3 n = glm::normalize(glm::vec3(-hg[i].y, -hg[i].z, 1.0f)) * 0.5f + 0.5f;
+        const float h = (hg[i].x - lo) / (hi - lo);
+        for (int c = 0; c < 4; ++c) t.rgba[i * 4 + size_t(c)] = uint8_t(std::lround(255.0f * (c < 3 ? n[c] : h)));
+    }
+    return t;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------- resources
+
+uint32_t Renderer::memoryType(uint32_t bits, VkMemoryPropertyFlags want) const {
+    for (uint32_t i = 0; i < memProps_.memoryTypeCount; ++i)
+        if ((bits & (1u << i)) && (memProps_.memoryTypes[i].propertyFlags & want) == want) return i;
+    throw std::runtime_error("no suitable Vulkan memory type");
+}
+
+Renderer::Buffer Renderer::makeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool host) {
+    Buffer b;
+    b.size = size;
+    VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    ci.size = size;
+    ci.usage = usage;
+    check(vkCreateBuffer(device_, &ci, nullptr, &b.buf), "vkCreateBuffer");
+    VkMemoryRequirements r;
+    vkGetBufferMemoryRequirements(device_, b.buf, &r);
+    VkMemoryAllocateFlagsInfo fi{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+    fi.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ai.pNext = &fi;
+    ai.allocationSize = r.size;
+    ai.memoryTypeIndex = memoryType(r.memoryTypeBits, host ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                                                           : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    check(vkAllocateMemory(device_, &ai, nullptr, &b.mem), "vkAllocateMemory(buffer)");
+    check(vkBindBufferMemory(device_, b.buf, b.mem, 0), "vkBindBufferMemory");
+    if (host) check(vkMapMemory(device_, b.mem, 0, VK_WHOLE_SIZE, 0, &b.map), "vkMapMemory");
+    return b;
+}
+
+void Renderer::destroy(Buffer& b) {
+    if (b.buf) vkDestroyBuffer(device_, b.buf, nullptr);
+    if (b.mem) vkFreeMemory(device_, b.mem, nullptr);
+    b = {};
+}
+
+// Replaces b with a buffer of at least `size` (doubling) when it is too small. Only for buffers no pending frame uses.
+void Renderer::growBuffer(Buffer& b, VkDeviceSize size, VkBufferUsageFlags usage, bool host, std::vector<Buffer>* garbage) {
+    if (b.size >= size) return;
+    const VkDeviceSize n = std::max<VkDeviceSize>(size, 2 * b.size + 4096);
+    if (garbage) garbage->push_back(b); // still referenced by commands recorded this frame
+    else destroy(b);
+    b = makeBuffer(n, usage, host);
+}
+
+VkDeviceAddress Renderer::address(VkBuffer b) const {
+    VkBufferDeviceAddressInfo ai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    ai.buffer = b;
+    return vkGetBufferDeviceAddress(device_, &ai);
+}
+
+void Renderer::destroy(Frame::Accel& a) {
+    if (a.as) vkDestroyAS_(device_, a.as, nullptr);
+    destroy(a.buf);
+    a = {};
+}
+
+VkImage Renderer::newImage(uint32_t w, uint32_t h, VkFormat fmt, VkSampleCountFlagBits samples, VkImageUsageFlags usage,
+                           uint32_t mips) {
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = fmt;
+    ci.extent = {w, h, 1};
+    ci.mipLevels = mips;
+    ci.arrayLayers = 1;
+    ci.samples = samples;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = usage;
+    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImage img;
+    check(vkCreateImage(device_, &ci, nullptr, &img), "vkCreateImage");
+    return img;
+}
+
+VkImageView Renderer::newView(VkImage img, VkFormat fmt, VkImageAspectFlags aspect, uint32_t mips) {
+    VkImageViewCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    ci.image = img;
+    ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ci.format = fmt;
+    ci.subresourceRange = {aspect, 0, mips, 0, 1};
+    VkImageView v;
+    check(vkCreateImageView(device_, &ci, nullptr, &v), "vkCreateImageView");
+    return v;
+}
+
+// Render target with its own allocation. Transient attachments (MSAA colour / depth) take lazily allocated memory
+// where the device has it (tile-based GPUs), plain device-local memory otherwise.
+Renderer::Image Renderer::makeTarget(VkFormat fmt, VkSampleCountFlagBits samples, VkImageUsageFlags usage) {
+    Image im;
+    im.img = newImage(extent_.width, extent_.height, fmt, samples, usage, 1);
+    VkMemoryRequirements r;
+    vkGetImageMemoryRequirements(device_, im.img, &r);
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = r.size;
+    constexpr VkMemoryPropertyFlags kLazy = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+    bool lazy = false;
+    for (uint32_t i = 0; (usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) && i < memProps_.memoryTypeCount; ++i)
+        lazy |= (r.memoryTypeBits & (1u << i)) && (memProps_.memoryTypes[i].propertyFlags & kLazy) == kLazy;
+    ai.memoryTypeIndex = memoryType(r.memoryTypeBits, lazy ? kLazy : VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+    check(vkAllocateMemory(device_, &ai, nullptr, &im.mem), "vkAllocateMemory(target)");
+    check(vkBindImageMemory(device_, im.img, im.mem, 0), "vkBindImageMemory");
+    const bool depth = fmt == depthFormat_;
+    im.view = newView(im.img, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    return im;
+}
+
+void Renderer::destroy(Image& i) {
+    if (i.view) vkDestroyImageView(device_, i.view, nullptr);
+    if (i.img) vkDestroyImage(device_, i.img, nullptr);
+    if (i.mem) vkFreeMemory(device_, i.mem, nullptr);
+    i = {};
+}
+
+VkCommandBuffer Renderer::beginOneShot() {
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = pool_;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cb;
+    check(vkAllocateCommandBuffers(device_, &ai, &cb), "vkAllocateCommandBuffers");
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    check(vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer");
+    return cb;
+}
+
+void Renderer::endOneShot(VkCommandBuffer cb) {
+    check(vkEndCommandBuffer(cb), "vkEndCommandBuffer");
+    VkCommandBufferSubmitInfo ci{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    ci.commandBuffer = cb;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &ci;
+    std::lock_guard lock(queueMutex_);
+    check(vkQueueSubmit2(queue_, 1, &si, VK_NULL_HANDLE), "vkQueueSubmit2(upload)");
+    check(vkQueueWaitIdle(queue_), "vkQueueWaitIdle");
+    vkFreeCommandBuffers(device_, pool_, 1, &cb);
+}
+
+uint32_t Renderer::allocSlot(VkImageView view) {
+    if (freeSlots_.empty()) return kNoSlot;
+    const uint32_t slot = freeSlots_.back();
+    freeSlots_.pop_back();
+    VkDescriptorImageInfo ii{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w.dstSet = set_;
+    w.dstBinding = 0;
+    w.dstArrayElement = slot;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    w.pImageInfo = &ii;
+    vkUpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+    return slot;
+}
+
+void Renderer::freeSlot(uint32_t slot) {
+    destroy(slots_[slot]);
+    freeSlots_.push_back(slot);
+}
+
+// Creates one image per source in a single device allocation (returned; the caller owns it), copies the texels
+// through `staging` at `off` and generates mipmaps with blits. Appends one bindless slot per source to `slots`
+// (kNoSlot when the table is full). Records into cb; the images are SHADER_READ_ONLY once cb has executed.
+VkDeviceMemory Renderer::createTextures(VkCommandBuffer cb, const Buffer& staging, VkDeviceSize& off,
+                                        std::span<const TexSrc> texs, bool mips, std::vector<uint32_t>& slots) {
+    if (texs.empty()) return VK_NULL_HANDLE;
+    std::vector<VkImage> imgs;
+    std::vector<VkDeviceSize> offsets;
+    std::vector<uint32_t> levels;
+    VkDeviceSize total = 0;
+    uint32_t bits = ~0u;
+    for (const TexSrc& t : texs) {
+        levels.push_back(mips ? uint32_t(std::bit_width(std::max(t.w, t.h))) : 1);
+        imgs.push_back(newImage(t.w, t.h, kTexFormat, VK_SAMPLE_COUNT_1_BIT,
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                levels.back()));
+        VkMemoryRequirements r;
+        vkGetImageMemoryRequirements(device_, imgs.back(), &r);
+        total = (total + r.alignment - 1) / r.alignment * r.alignment;
+        offsets.push_back(total);
+        total += r.size;
+        bits &= r.memoryTypeBits;
+    }
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = total;
+    ai.memoryTypeIndex = memoryType(bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkDeviceMemory mem;
+    check(vkAllocateMemory(device_, &ai, nullptr, &mem), "vkAllocateMemory(textures)");
+
+    for (size_t i = 0; i < texs.size(); ++i) {
+        const TexSrc& t = texs[i];
+        VkImage img = imgs[i];
+        check(vkBindImageMemory(device_, img, mem, offsets[i]), "vkBindImageMemory(texture)");
+        const VkDeviceSize bytes = VkDeviceSize(t.w) * t.h * 4;
+        std::memcpy(static_cast<uint8_t*>(staging.map) + off, t.rgba, bytes);
+
+        constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT;
+        constexpr auto DST = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, SRC = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       READ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        constexpr auto XFER = VK_PIPELINE_STAGE_2_TRANSFER_BIT, FRAG = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        imageBarrier(cb, img, C, 0, levels[i], VK_IMAGE_LAYOUT_UNDEFINED, DST, VK_PIPELINE_STAGE_2_NONE, 0, XFER,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy copy{};
+        copy.bufferOffset = off;
+        copy.imageSubresource = {C, 0, 0, 1};
+        copy.imageExtent = {t.w, t.h, 1};
+        vkCmdCopyBufferToImage(cb, staging.buf, img, DST, 1, &copy);
+        off += bytes;
+        int32_t w = int32_t(t.w), h = int32_t(t.h);
+        for (uint32_t m = 1; m < levels[i]; ++m) {
+            imageBarrier(cb, img, C, m - 1, 1, DST, SRC, XFER, VK_ACCESS_2_TRANSFER_WRITE_BIT, XFER, VK_ACCESS_2_TRANSFER_READ_BIT);
+            VkImageBlit blit{};
+            blit.srcSubresource = {C, m - 1, 0, 1};
+            blit.srcOffsets[1] = {w, h, 1};
+            w = std::max(w / 2, 1);
+            h = std::max(h / 2, 1);
+            blit.dstSubresource = {C, m, 0, 1};
+            blit.dstOffsets[1] = {w, h, 1};
+            vkCmdBlitImage(cb, img, SRC, img, DST, 1, &blit, VK_FILTER_LINEAR);
+            imageBarrier(cb, img, C, m - 1, 1, SRC, READ, XFER, VK_ACCESS_2_TRANSFER_READ_BIT, FRAG, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        }
+        imageBarrier(cb, img, C, levels[i] - 1, 1, DST, READ, XFER, VK_ACCESS_2_TRANSFER_WRITE_BIT, FRAG,
+                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+        Image im{img, newView(img, kTexFormat, C, levels[i]), VK_NULL_HANDLE};
+        const uint32_t slot = allocSlot(im.view);
+        if (slot == kNoSlot) destroy(im);
+        else slots_[slot] = im;
+        slots.push_back(slot);
+    }
+    return mem;
+}
+
+// ---------------------------------------------------------------- init / teardown
+
+Renderer::Renderer() = default;
+
+Renderer::~Renderer() {
+    // BBTIME_VK_PRESENT_LOG=1: statistics of the CPU time between consecutive presents of 3-D frames (frame-generation
+    // pacing; the first 32 are skipped as warm-up).
+    if (const char* e = std::getenv("BBTIME_VK_PRESENT_LOG"); e && *e && *e != '0' && presentTimes_.size() > 64) {
+        std::vector<double> d;
+        for (size_t i = 32; i < presentTimes_.size(); ++i) d.push_back(double(presentTimes_[i] - presentTimes_[i - 1]) * 1e-6); // skip warm-up
+        double mean = 0, var = 0;
+        for (double x : d) mean += x / double(d.size());
+        for (double x : d) var += (x - mean) * (x - mean) / double(d.size());
+        std::ranges::sort(d);
+        double tm = 0, tv = 0; // without the longest 1% (hitches: shader compiles, level events)
+        const size_t n = d.size() - d.size() / 100;
+        for (size_t i = 0; i < n; ++i) tm += d[i] / double(n);
+        for (size_t i = 0; i < n; ++i) tv += (d[i] - tm) * (d[i] - tm) / double(n);
+        std::println(stderr, "vk: present intervals n {} mean {:.3f} ms stddev {:.3f} ms | trimmed 99%: mean {:.3f} stddev {:.3f} cv {:.2f} | "
+                     "p5 {:.3f} p50 {:.3f} p95 {:.3f}", d.size(), mean, std::sqrt(var), tm, std::sqrt(tv), std::sqrt(tv) / tm,
+                     d[d.size() / 20], d[d.size() / 2], d[d.size() * 19 / 20]);
+    }
+    if (device_) {
+        try {
+            stopPresenter();
+        } catch (const std::exception& e) {
+            std::println(stderr, "vk: present thread: {}", e.what());
+        }
+        vkDeviceWaitIdle(device_);
+        freeScene();
+        fsr_.reset();
+        destroyFsrTargets();
+        for (uint32_t s = 0; s < slots_.size(); ++s) destroy(slots_[s]);
+        if (pipelineCache_) {
+            size_t n = 0;
+            vkGetPipelineCacheData(device_, pipelineCache_, &n, nullptr);
+            std::vector<char> data(n);
+            if (n && vkGetPipelineCacheData(device_, pipelineCache_, &n, data.data()) == VK_SUCCESS) {
+                // Atomic replace: several processes (parallel ctest) start / exit at once and must never read a
+                // half-written cache.
+                std::error_code ec;
+                fs::create_directories(pipelineCachePath_.parent_path(), ec);
+                const fs::path tmp = pipelineCachePath_.string() + std::format(".{}.tmp", SDL_GetCurrentThreadID());
+                if (std::ofstream(tmp, std::ios::binary).write(data.data(), std::streamsize(n))) fs::rename(tmp, pipelineCachePath_, ec);
+                else fs::remove(tmp, ec);
+            }
+            vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
+        }
+        for (Frame& f : frames_) {
+            destroy(f.stream);
+            for (Buffer* b : {&f.light, &f.geos, &f.instances, &f.scratch}) destroy(*b);
+            if (rt_) destroy(f.actorBlas), destroy(f.tlas);
+            for (Buffer& b : f.garbage) destroy(b);
+            vkDestroyFence(device_, f.fence, nullptr);
+            vkDestroySemaphore(device_, f.acquired, nullptr);
+            for (int k = 0; k < 2; ++k) {
+                vkDestroyFence(device_, f.copyFence[k], nullptr);
+                vkDestroySemaphore(device_, f.copyAcquired[k], nullptr);
+            }
+        }
+        destroySwapchain();
+        for (auto& row : pipe3D_)
+            for (VkPipeline p : row) vkDestroyPipeline(device_, p, nullptr);
+        for (VkPipeline p : pipe2D_) vkDestroyPipeline(device_, p, nullptr);
+        for (VkPipeline p : pipe2DMul_) vkDestroyPipeline(device_, p, nullptr);
+        for (auto& kind : pipeLit_)
+            for (auto& mv : kind)
+                for (auto& row : mv)
+                    for (VkPipeline p : row) vkDestroyPipeline(device_, p, nullptr);
+        vkDestroyPipeline(device_, pipeShadow_, nullptr);
+        for (VkImageView v : shadowLayers_) vkDestroyImageView(device_, v, nullptr);
+        destroy(shadowMap_);
+        vkDestroySampler(device_, shadowSampler_, nullptr);
+        vkDestroyDescriptorPool(device_, lightPool_, nullptr);
+        vkDestroyDescriptorSetLayout(device_, lightLayout_, nullptr);
+        vkDestroyPipelineLayout(device_, layout_, nullptr);
+        vkDestroyDescriptorPool(device_, descPool_, nullptr);
+        vkDestroyDescriptorSetLayout(device_, setLayout_, nullptr);
+        for (VkSampler s : samplers_) vkDestroySampler(device_, s, nullptr);
+        vkDestroyCommandPool(device_, pool_, nullptr);
+        vkDestroyCommandPool(device_, presentPool_, nullptr);
+        vkDestroyDevice(device_, nullptr);
+    }
+    if (surface_) vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    if (messenger_) {
+        auto destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+            vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
+        destroyMessenger(instance_, messenger_, nullptr);
+        std::println(stderr, "vk: {} validation messages", validationMessages_);
+    }
+    if (instance_) vkDestroyInstance(instance_, nullptr);
+    if (window_) SDL_DestroyWindow(window_);
+}
+
+std::string Renderer::init(const WindowConfig& cfg, bool validation) try {
+    SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (cfg.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+    if (cfg.hidden) flags |= SDL_WINDOW_HIDDEN;
+    window_ = SDL_CreateWindow(cfg.title, cfg.width, cfg.height, flags);
+    if (!window_) return std::string("cannot create Vulkan window: ") + SDL_GetError();
+
+    uint32_t n = 0;
+    const char* const* sdlExts = SDL_Vulkan_GetInstanceExtensions(&n);
+    if (!sdlExts) return std::string("SDL_Vulkan_GetInstanceExtensions: ") + SDL_GetError();
+    std::vector<const char*> exts(sdlExts, sdlExts + n), layers;
+    VkDebugUtilsMessengerCreateInfoEXT dbg{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+    dbg.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    dbg.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    dbg.pfnUserCallback = onDebug;
+    dbg.pUserData = &validationMessages_;
+    const VkBool32 on = VK_TRUE;
+    const VkLayerSettingEXT syncval{"VK_LAYER_KHRONOS_validation", "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &on};
+    VkLayerSettingsCreateInfoEXT settings{VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT, &dbg, 1, &syncval};
+    if (validation) {
+        exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        exts.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
+        layers.push_back("VK_LAYER_KHRONOS_validation");
+    }
+    VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.pApplicationName = "bbtime";
+    app.pEngineName = "bbtime";
+    app.apiVersion = VK_API_VERSION_1_3;
+    VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    ici.pNext = validation ? &settings : nullptr;
+    ici.pApplicationInfo = &app;
+    ici.enabledExtensionCount = uint32_t(exts.size());
+    ici.ppEnabledExtensionNames = exts.data();
+    ici.enabledLayerCount = uint32_t(layers.size());
+    ici.ppEnabledLayerNames = layers.data();
+    check(vkCreateInstance(&ici, nullptr, &instance_), validation ? "vkCreateInstance (validation layer installed?)" : "vkCreateInstance");
+    if (validation) {
+        auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance_, "vkCreateDebugUtilsMessengerEXT"));
+        check(create(instance_, &dbg, nullptr, &messenger_), "vkCreateDebugUtilsMessengerEXT");
+    }
+    if (!SDL_Vulkan_CreateSurface(window_, instance_, nullptr, &surface_))
+        return std::string("SDL_Vulkan_CreateSurface: ") + SDL_GetError();
+
+    // Device: Vulkan 1.3 + dynamic rendering, sync2, descriptor indexing, a graphics queue that can present.
+    check(vkEnumeratePhysicalDevices(instance_, &n, nullptr), "vkEnumeratePhysicalDevices");
+    std::vector<VkPhysicalDevice> gpus(n);
+    check(vkEnumeratePhysicalDevices(instance_, &n, gpus.data()), "vkEnumeratePhysicalDevices");
+    int bestScore = -1;
+    for (VkPhysicalDevice g : gpus) {
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(g, &p);
+        if (p.apiVersion < VK_API_VERSION_1_3) continue;
+        VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+        VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &f13};
+        VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12};
+        vkGetPhysicalDeviceFeatures2(g, &f2);
+        if (!f13.dynamicRendering || !f13.synchronization2 || !f13.shaderDemoteToHelperInvocation || !f12.runtimeDescriptorArray || !f12.descriptorBindingPartiallyBound ||
+            !f12.descriptorBindingSampledImageUpdateAfterBind || !f12.descriptorBindingUpdateUnusedWhilePending ||
+            !f12.shaderSampledImageArrayNonUniformIndexing)
+            continue;
+        uint32_t qn = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(g, &qn, nullptr);
+        std::vector<VkQueueFamilyProperties> qs(qn);
+        vkGetPhysicalDeviceQueueFamilyProperties(g, &qn, qs.data());
+        for (uint32_t q = 0; q < qn; ++q) {
+            VkBool32 present = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(g, q, surface_, &present);
+            if (!(qs[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) || !present) continue;
+            const int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+            if (score > bestScore) { bestScore = score; gpu_ = g; queueFamily_ = q; }
+            break;
+        }
+    }
+    if (!gpu_) return "no Vulkan 1.3 device with dynamic rendering, synchronization2, descriptor indexing and presentation";
+    depthFormat_ = VK_FORMAT_UNDEFINED;
+    for (const VkFormat f : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_X8_D24_UNORM_PACK32}) {
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(gpu_, f, &fp);
+        if ((fp.optimalTilingFeatures & kDepthFeatures) == kDepthFeatures) { depthFormat_ = f; break; }
+    }
+    if (depthFormat_ == VK_FORMAT_UNDEFINED) return "no sampled depth format (D32 / D24) on this device";
+
+    VkPhysicalDeviceVulkan12Properties p12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &p12};
+    vkGetPhysicalDeviceProperties2(gpu_, &p2);
+    const VkPhysicalDeviceLimits& lim = p2.properties.limits;
+    vkGetPhysicalDeviceMemoryProperties(gpu_, &memProps_);
+    VkPhysicalDeviceFeatures base;
+    vkGetPhysicalDeviceFeatures(gpu_, &base);
+    vendor_ = vendorName(p2.properties.vendorID);
+    rendererName_ = p2.properties.deviceName;
+    const uint32_t api = p2.properties.apiVersion;
+    version_ = std::format("Vulkan {}.{}.{} {} {}", VK_API_VERSION_MAJOR(api), VK_API_VERSION_MINOR(api), VK_API_VERSION_PATCH(api),
+                           p12.driverName, p12.driverInfo);
+    if (base.samplerAnisotropy) maxAniso_ = lim.maxSamplerAnisotropy;
+    const VkSampleCountFlags counts = lim.framebufferColorSampleCounts & lim.framebufferDepthSampleCounts;
+    for (int s = std::bit_floor(unsigned(std::max(cfg.msaaSamples, 1))); s > 1 && msaaMax_ == VK_SAMPLE_COUNT_1_BIT; s /= 2)
+        if (counts & unsigned(s)) msaaMax_ = VkSampleCountFlagBits(s);
+    msaaSamples_ = msaaMax_ > 1 ? int(msaaMax_) : 0;
+    maxSlots_ = std::min({4096u, p12.maxPerStageDescriptorUpdateAfterBindSampledImages, p12.maxDescriptorSetUpdateAfterBindSampledImages});
+
+    // Ray tracing: ray queries from the fragment shader (shadows, AO). The RT pipeline extension is only reported.
+    check(vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &n, nullptr), "vkEnumerateDeviceExtensionProperties");
+    std::vector<VkExtensionProperties> dexts(n);
+    check(vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &n, dexts.data()), "vkEnumerateDeviceExtensionProperties");
+    auto has = [&](std::string_view e) { return std::ranges::any_of(dexts, [&](const auto& x) { return e == x.extensionName; }); };
+    VkPhysicalDeviceRayQueryFeaturesKHR rqf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &rqf};
+    VkPhysicalDeviceVulkan12Features q12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &asf};
+    VkPhysicalDeviceFeatures2 qf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &q12};
+    vkGetPhysicalDeviceFeatures2(gpu_, &qf);
+    const bool rtExts = has(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) && has(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+                        has(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    const char* noRt = std::getenv("BBTIME_VK_NO_RT");
+    const bool rtForcedOff = noRt && *noRt && *noRt != '0';
+    rt_ = rtExts && asf.accelerationStructure && rqf.rayQuery && q12.bufferDeviceAddress && !rtForcedOff;
+    rtProbe_ = std::format("RT: accel_struct {} ray_query {} rt_pipeline {}{}", has(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ? "yes" : "no",
+                           has(VK_KHR_RAY_QUERY_EXTENSION_NAME) ? "yes" : "no", has(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) ? "yes" : "no",
+                           rtForcedOff ? " (off: BBTIME_VK_NO_RT)" : rt_ ? "" : " (unsupported: shadow maps)");
+    diag_ = rtProbe_;
+    if (rt_) {
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR asp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 pp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &asp};
+        vkGetPhysicalDeviceProperties2(gpu_, &pp);
+        scratchAlign_ = std::max<VkDeviceSize>(asp.minAccelerationStructureScratchOffsetAlignment, 1);
+    }
+    // FSR 3.1.4 (third_party/fidelityfx-sdk, the etiyami requirements): the FP32/wave32 blobs write and read formatless
+    // storage images and use compute quad / arithmetic subgroup operations; the upscaler's resources and the RGBA8
+    // display images need storage; the output is blitted into the swapchain; motion vectors need independent blend.
+    {
+        VkPhysicalDeviceSubgroupProperties sp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+        VkPhysicalDeviceProperties2 pp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &sp};
+        vkGetPhysicalDeviceProperties2(gpu_, &pp);
+        auto storage = [&](VkFormat f, VkFormatFeatureFlags more = 0) {
+            VkFormatProperties fp;
+            vkGetPhysicalDeviceFormatProperties(gpu_, f, &fp);
+            const VkFormatFeatureFlags want = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | more;
+            return (fp.optimalTilingFeatures & want) == want;
+        };
+        VkSurfaceCapabilitiesKHR caps;
+        check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu_, surface_, &caps), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+        const char* noFsr = std::getenv("BBTIME_VK_NO_FSR");
+        const bool fsrForcedOff = noFsr && *noFsr && *noFsr != '0';
+        constexpr VkSubgroupFeatureFlags ops = VK_SUBGROUP_FEATURE_QUAD_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+        fsrOk_ = !fsrForcedOff && base.shaderStorageImageWriteWithoutFormat && base.shaderStorageImageReadWithoutFormat &&
+                 base.independentBlend && (sp.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) && (sp.supportedOperations & ops) == ops &&
+                 storage(VK_FORMAT_R16G16B16A16_SFLOAT) && storage(VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) &&
+                 storage(VK_FORMAT_R32_SFLOAT) && storage(VK_FORMAT_R32_UINT) &&
+                 storage(VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT) &&
+                 (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        fsrProbe_ = fsrForcedOff ? "FSR: off (BBTIME_VK_NO_FSR)" : fsrOk_ ? "FSR 3.1.4: yes" : "FSR 3.1.4: unsupported";
+    }
+
+    const float prio = 1.0f;
+    VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+    qci.queueFamilyIndex = queueFamily_;
+    qci.queueCount = 1;
+    qci.pQueuePriorities = &prio;
+    VkPhysicalDeviceRayQueryFeaturesKHR erq{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    erq.rayQuery = VK_TRUE;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR eas{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &erq};
+    eas.accelerationStructure = VK_TRUE;
+    VkPhysicalDeviceVulkan13Features e13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, rt_ ? &eas : nullptr};
+    e13.dynamicRendering = e13.synchronization2 = VK_TRUE;
+    e13.shaderDemoteToHelperInvocation = VK_TRUE; // glslc lowers `discard` to demote for Vulkan 1.3 (required feature)
+    VkPhysicalDeviceVulkan12Features e12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &e13};
+    e12.runtimeDescriptorArray = e12.descriptorBindingPartiallyBound = e12.descriptorBindingSampledImageUpdateAfterBind =
+        e12.descriptorBindingUpdateUnusedWhilePending = e12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    e12.bufferDeviceAddress = rt_;
+    VkPhysicalDeviceFeatures2 e2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &e12};
+    e2.features.samplerAnisotropy = base.samplerAnisotropy;
+    e2.features.shaderStorageImageWriteWithoutFormat = e2.features.shaderStorageImageReadWithoutFormat = e2.features.independentBlend = fsrOk_;
+    const char* devExts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                             VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+    VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &e2};
+    dci.queueCreateInfoCount = 1;
+    dci.pQueueCreateInfos = &qci;
+    dci.enabledExtensionCount = rt_ ? 4 : 1;
+    dci.ppEnabledExtensionNames = devExts;
+    check(vkCreateDevice(gpu_, &dci, nullptr, &device_), "vkCreateDevice");
+    vkGetDeviceQueue(device_, queueFamily_, 0, &queue_);
+    if (fsrOk_ && !Fsr::load(instance_)) {
+        fsrOk_ = false;
+        fsrProbe_ = "FSR 3.1.4: Vulkan entry points missing";
+    }
+    if (fsrOk_) fsr_ = std::make_unique<Fsr>(instance_, gpu_, device_);
+    diag_ = rtProbe_ + " | " + fsrProbe_;
+    if (rt_) {
+        auto fn = [&]<class F>(F& out, const char* name) { out = reinterpret_cast<F>(vkGetDeviceProcAddr(device_, name)); };
+        fn(vkCreateAS_, "vkCreateAccelerationStructureKHR");
+        fn(vkDestroyAS_, "vkDestroyAccelerationStructureKHR");
+        fn(vkASSizes_, "vkGetAccelerationStructureBuildSizesKHR");
+        fn(vkCmdBuildAS_, "vkCmdBuildAccelerationStructuresKHR");
+        fn(vkASAddress_, "vkGetAccelerationStructureDeviceAddressKHR");
+    }
+
+    VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pci.queueFamilyIndex = queueFamily_;
+    check(vkCreateCommandPool(device_, &pci, nullptr, &pool_), "vkCreateCommandPool");
+    check(vkCreateCommandPool(device_, &pci, nullptr, &presentPool_), "vkCreateCommandPool(present thread)");
+
+    // Surface format: 8-bit UNORM like the GL default framebuffer (no sRGB conversion).
+    check(vkGetPhysicalDeviceSurfaceFormatsKHR(gpu_, surface_, &n, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    std::vector<VkSurfaceFormatKHR> fmts(n);
+    check(vkGetPhysicalDeviceSurfaceFormatsKHR(gpu_, surface_, &n, fmts.data()), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    swapFormat_ = fmts.empty() ? VK_FORMAT_UNDEFINED : fmts[0].format;
+    for (VkFormat want : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM})
+        for (const VkSurfaceFormatKHR& f : fmts)
+            if (f.format == want && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) swapFormat_ = want;
+
+    // Samplers (immutable in the set layout): same four as the GL renderer.
+    auto sampler = [&](VkFilter filter, VkSamplerMipmapMode mip, VkSamplerAddressMode wrap, float aniso, float maxLod) {
+        VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        ci.magFilter = ci.minFilter = filter;
+        ci.mipmapMode = mip;
+        ci.addressModeU = ci.addressModeV = ci.addressModeW = wrap;
+        ci.anisotropyEnable = aniso > 1.0f;
+        ci.maxAnisotropy = aniso;
+        ci.maxLod = maxLod;
+        VkSampler s;
+        check(vkCreateSampler(device_, &ci, nullptr, &s), "vkCreateSampler");
+        return s;
+    };
+    samplers_[kSampNearest] = sampler(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT, 1.0f, 0.0f);
+    samplers_[kSampTrilinear] = sampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, maxAniso_, VK_LOD_CLAMP_NONE);
+    samplers_[kSampUiNearest] = sampler(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f, 0.0f);
+    samplers_[kSampUiLinear] = sampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f, 0.0f);
+    samplers_[kSampLinear] = sampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT, 1.0f, 0.0f);
+
+    // One bindless set: binding 0 = every texture (update-after-bind), binding 1 = the four samplers.
+    VkDescriptorSetLayoutBinding binds[2]{};
+    binds[0] = {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxSlots_, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+    binds[1] = {1, VK_DESCRIPTOR_TYPE_SAMPLER, 5, VK_SHADER_STAGE_FRAGMENT_BIT, samplers_};
+    const VkDescriptorBindingFlags bindFlags[2] = {VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                                                       VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT, 0};
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bfi{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+    bfi.bindingCount = 2;
+    bfi.pBindingFlags = bindFlags;
+    VkDescriptorSetLayoutCreateInfo lci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, &bfi};
+    lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    lci.bindingCount = 2;
+    lci.pBindings = binds;
+    check(vkCreateDescriptorSetLayout(device_, &lci, nullptr, &setLayout_), "vkCreateDescriptorSetLayout");
+    const VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxSlots_}, {VK_DESCRIPTOR_TYPE_SAMPLER, 5}};
+    VkDescriptorPoolCreateInfo dpi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    dpi.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    dpi.maxSets = 1;
+    dpi.poolSizeCount = 2;
+    dpi.pPoolSizes = sizes;
+    check(vkCreateDescriptorPool(device_, &dpi, nullptr, &descPool_), "vkCreateDescriptorPool");
+    VkDescriptorSetAllocateInfo dsa{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    dsa.descriptorPool = descPool_;
+    dsa.descriptorSetCount = 1;
+    dsa.pSetLayouts = &setLayout_;
+    check(vkAllocateDescriptorSets(device_, &dsa, &set_), "vkAllocateDescriptorSets");
+    slots_.assign(maxSlots_, {});
+    for (uint32_t s = maxSlots_; s-- > 0;) freeSlots_.push_back(s); // pop_back hands out 0, 1, 2, ...
+
+    // Set 1, one per frame in flight: Enhanced lighting / FSR. 0 = LightUbo (also the motion-vector matrices),
+    // 1 = cascaded shadow map (compare sampler),
+    // ray tracing only: 2 = TLAS, 3 = geometry table for alpha-tested hits (RtGeo).
+    {
+        VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        ci.magFilter = ci.minFilter = VK_FILTER_LINEAR;
+        ci.addressModeU = ci.addressModeV = ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        ci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; // outside a cascade = lit
+        ci.compareEnable = VK_TRUE;
+        ci.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        check(vkCreateSampler(device_, &ci, nullptr, &shadowSampler_), "vkCreateSampler(shadow)");
+        const VkShaderStageFlags fs = VK_SHADER_STAGE_FRAGMENT_BIT;
+        const VkDescriptorSetLayoutBinding lb[4] = {{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, fs | VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+                                                    {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, fs, &shadowSampler_},
+                                                    {2, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, fs, nullptr},
+                                                    {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, fs, nullptr}};
+        VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        li.bindingCount = rt_ ? 4 : 2;
+        li.pBindings = lb;
+        check(vkCreateDescriptorSetLayout(device_, &li, nullptr, &lightLayout_), "vkCreateDescriptorSetLayout(light)");
+        const VkDescriptorPoolSize ps[4] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFrames}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kFrames},
+                                            {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFrames}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFrames}};
+        VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        pi.maxSets = kFrames;
+        pi.poolSizeCount = rt_ ? 4 : 2;
+        pi.pPoolSizes = ps;
+        check(vkCreateDescriptorPool(device_, &pi, nullptr, &lightPool_), "vkCreateDescriptorPool(light)");
+
+        // Shadow map: kCascades layers of D32, sampled as one array.
+        VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ic.imageType = VK_IMAGE_TYPE_2D;
+        ic.format = depthFormat_;
+        ic.extent = {kShadowSize, kShadowSize, 1};
+        ic.mipLevels = 1;
+        ic.arrayLayers = kCascades;
+        ic.samples = VK_SAMPLE_COUNT_1_BIT;
+        ic.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        check(vkCreateImage(device_, &ic, nullptr, &shadowMap_.img), "vkCreateImage(shadow)");
+        VkMemoryRequirements r;
+        vkGetImageMemoryRequirements(device_, shadowMap_.img, &r);
+        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ai.allocationSize = r.size;
+        ai.memoryTypeIndex = memoryType(r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        check(vkAllocateMemory(device_, &ai, nullptr, &shadowMap_.mem), "vkAllocateMemory(shadow)");
+        check(vkBindImageMemory(device_, shadowMap_.img, shadowMap_.mem, 0), "vkBindImageMemory(shadow)");
+        VkImageViewCreateInfo vc{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vc.image = shadowMap_.img;
+        vc.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        vc.format = depthFormat_;
+        vc.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, kCascades};
+        check(vkCreateImageView(device_, &vc, nullptr, &shadowMap_.view), "vkCreateImageView(shadow)");
+        vc.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vc.subresourceRange.layerCount = 1;
+        for (uint32_t c = 0; c < kCascades; ++c) {
+            vc.subresourceRange.baseArrayLayer = c;
+            check(vkCreateImageView(device_, &vc, nullptr, &shadowLayers_[c]), "vkCreateImageView(shadow layer)");
+        }
+        // Sampled before the first shadow pass only by frames that never draw it: start in the sampled layout.
+        VkCommandBuffer cb = beginOneShot();
+        imageBarrier(cb, shadowMap_.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, kCascades);
+        endOneShot(cb);
+    }
+
+    VkPushConstantRange pcr{kPushStages, 0, sizeof(Push3D)};
+    const VkDescriptorSetLayout setLayouts[2] = {setLayout_, lightLayout_};
+    VkPipelineLayoutCreateInfo plci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    plci.setLayoutCount = 2;
+    plci.pSetLayouts = setLayouts;
+    plci.pushConstantRangeCount = 1;
+    plci.pPushConstantRanges = &pcr;
+    check(vkCreatePipelineLayout(device_, &plci, nullptr, &layout_), "vkCreatePipelineLayout");
+
+    // Pipeline cache persisted across runs; the driver rejects data from another device/driver by itself.
+    pipelineCachePath_ = cacheDir() / "vk_pipeline_cache.bin";
+    std::vector<char> cacheData;
+    if (std::ifstream in(pipelineCachePath_, std::ios::binary); in) cacheData.assign(std::istreambuf_iterator<char>(in), {});
+    VkPipelineCacheCreateInfo cci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    cci.initialDataSize = cacheData.size();
+    cci.pInitialData = cacheData.data();
+    if (vkCreatePipelineCache(device_, &cci, nullptr, &pipelineCache_) != VK_SUCCESS) {
+        cci.initialDataSize = 0;
+        check(vkCreatePipelineCache(device_, &cci, nullptr, &pipelineCache_), "vkCreatePipelineCache");
+    }
+    createPipelines();
+
+    for (Frame& f : frames_) {
+        VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.commandPool = pool_;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        check(vkAllocateCommandBuffers(device_, &ai, &f.cmd), "vkAllocateCommandBuffers");
+        VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        check(vkCreateFence(device_, &fci, nullptr, &f.fence), "vkCreateFence");
+        VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        check(vkCreateSemaphore(device_, &sci, nullptr, &f.acquired), "vkCreateSemaphore");
+        VkFenceCreateInfo unsignaled{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkCommandBufferAllocateInfo pa = ai;
+        pa.commandPool = presentPool_;
+        pa.commandBufferCount = 2;
+        check(vkAllocateCommandBuffers(device_, &pa, f.copyCmd), "vkAllocateCommandBuffers(present)");
+        for (int k = 0; k < 2; ++k) {
+            check(vkCreateSemaphore(device_, &sci, nullptr, &f.copyAcquired[k]), "vkCreateSemaphore");
+            check(vkCreateFence(device_, &unsignaled, nullptr, &f.copyFence[k]), "vkCreateFence");
+        }
+        f.stream = makeBuffer(1 << 20, kStreamUsage | (rt_ ? kRtInput : 0), true);
+        f.light = makeBuffer(sizeof(LightUbo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        VkDescriptorSetAllocateInfo la{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        la.descriptorPool = lightPool_;
+        la.descriptorSetCount = 1;
+        la.pSetLayouts = &lightLayout_;
+        check(vkAllocateDescriptorSets(device_, &la, &f.lightSet), "vkAllocateDescriptorSets(light)");
+        const VkDescriptorBufferInfo bi{f.light.buf, 0, sizeof(LightUbo)};
+        const VkDescriptorImageInfo ii{VK_NULL_HANDLE, shadowMap_.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet w[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+        w[0].dstSet = w[1].dstSet = f.lightSet;
+        w[0].descriptorCount = w[1].descriptorCount = 1;
+        w[0].dstBinding = 0;
+        w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w[0].pBufferInfo = &bi;
+        w[1].dstBinding = 1;
+        w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[1].pImageInfo = &ii;
+        vkUpdateDescriptorSets(device_, 2, w, 0, nullptr);
+    }
+
+    Texture white{.name = "white", .width = 1, .height = 1, .rgba = {255, 255, 255, 255}};
+    if (createImage(white) != kSlotWhite || createImage(render::fontAtlas()) != kSlotFont)
+        return "cannot create white/font textures";
+    {   // Enhanced water: the procedural normal map (mipmapped, sampled repeating) and the wave-height image (drawScene)
+        const Texture n = waterNormalMap();
+        Buffer staging = makeBuffer(n.rgba.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+        VkCommandBuffer cb = beginOneShot();
+        VkDeviceSize off = 0;
+        std::vector<uint32_t> slot;
+        const TexSrc src{n.width, n.height, n.rgba.data()};
+        VkDeviceMemory mem = createTextures(cb, staging, off, {&src, 1}, true, slot);
+        constexpr uint32_t N = render::WaveField::kN;
+        Image w = makeImage({N, N}, VK_FORMAT_R16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        imageBarrier(cb, w.img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        endOneShot(cb);
+        destroy(staging);
+        waveSlot_ = allocSlot(w.view);
+        if (slot[0] == kNoSlot || waveSlot_ == kNoSlot) return "bindless table full (water textures)";
+        slots_[slot[0]].mem = mem;
+        waterNormalSlot_ = slot[0];
+        slots_[waveSlot_] = w;
+    }
+    SDL_GetWindowSizeInPixels(window_, &w_, &h_);
+    return {};
+} catch (const std::exception& e) {
+    return e.what();
+}
+
+void Renderer::createPipelines() {
+    auto module = [&](std::span<const uint32_t> code) {
+        VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        ci.codeSize = code.size_bytes();
+        ci.pCode = code.data();
+        VkShaderModule m;
+        check(vkCreateShaderModule(device_, &ci, nullptr, &m), "vkCreateShaderModule");
+        return m;
+    };
+    VkShaderModule sv = module(kSceneVert), sf = module(kSceneFrag), uv = module(kUiVert), uf = module(kUiFrag),
+                   lv = module(kSceneLitVert), mf = module(kSceneMapFrag), rf = rt_ ? module(kSceneRtFrag) : VK_NULL_HANDLE,
+                   hv = module(kShadowVert), hf = module(kShadowFrag), vv = fsrOk_ ? module(kSceneMvVert) : VK_NULL_HANDLE,
+                   vf = fsrOk_ ? module(kSceneMvFrag) : VK_NULL_HANDLE, mvf = fsrOk_ ? module(kSceneMapMvFrag) : VK_NULL_HANDLE,
+                   rvf = fsrOk_ && rt_ ? module(kSceneRtMvFrag) : VK_NULL_HANDLE;
+
+    // Scene vertex input: binding 0 Vertex; lit variants add binding 1 smooth normals (R8G8B8A8_SNORM), motion-vector
+    // variants also binding 2 = the previous frame's Vertex array (position only).
+    const VkVertexInputBindingDescription vb3[3] = {{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX},
+                                                    {1, sizeof(uint32_t), VK_VERTEX_INPUT_RATE_VERTEX},
+                                                    {2, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX}};
+    const VkVertexInputAttributeDescription va3[5] = {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)},
+                                                      {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)},
+                                                      {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Vertex, rgba)},
+                                                      {3, 1, VK_FORMAT_R8G8B8A8_SNORM, 0},
+                                                      {4, 2, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)}};
+    const VkVertexInputBindingDescription vb2{0, sizeof(V2), VK_VERTEX_INPUT_RATE_VERTEX};
+    const VkVertexInputAttributeDescription va2[4] = {{0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(V2, x)},
+                                                      {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(V2, u)},
+                                                      {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(V2, rgba)},
+                                                      {3, 0, VK_FORMAT_R32_UINT, offsetof(V2, texSamp)}};
+
+    // Blend modes as in the GL renderer; destination alpha is kept (window never turns see-through).
+    auto blend = [](bool on, VkBlendFactor dst, VkBlendOp op) {
+        VkPipelineColorBlendAttachmentState b{};
+        b.blendEnable = on;
+        b.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        b.dstColorBlendFactor = dst;
+        b.colorBlendOp = op;
+        b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.alphaBlendOp = VK_BLEND_OP_ADD;
+        b.colorWriteMask = 0xF;
+        return b;
+    };
+    VkPipelineColorBlendAttachmentState blends[5] = {
+        blend(false, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD),                // Opaque + AlphaTest
+        blend(true, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD),  // Alpha (and the 2D layer)
+        blend(true, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD),                  // Additive
+        blend(true, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_REVERSE_SUBTRACT),     // Subtract: dst - src
+        blend(true, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD)};                // 2D multiply: dst · src
+    blends[4].srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+
+    // shadow: depth-only caster pass into a shadow-map layer (no culling, slope-scaled depth bias). inputs: scene vertex
+    // bindings (1 Vertex, 2 + normals, 3 + previous positions = motion vectors into a second colour attachment).
+    auto make = [&](VkShaderModule vert, VkShaderModule frag, bool ui, int blendIdx, VkSampleCountFlagBits samples, bool shadow = false,
+                    int inputs = 1) {
+        const bool mv = inputs == 3;
+        VkPipelineShaderStageCreateInfo st[2]{};
+        st[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vert, "main", nullptr};
+        st[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, frag, "main", nullptr};
+        VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        vi.vertexBindingDescriptionCount = ui ? 1 : uint32_t(inputs);
+        vi.pVertexBindingDescriptions = ui ? &vb2 : vb3;
+        vi.vertexAttributeDescriptionCount = ui ? 4 : shadow ? 2 : uint32_t(2 + inputs);
+        vi.pVertexAttributeDescriptions = ui ? va2 : va3;
+        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        vp.viewportCount = vp.scissorCount = 1;
+        VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+        rs.polygonMode = VK_POLYGON_MODE_FILL;
+        rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // engine space front faces; y flipped by the negative viewport
+        rs.lineWidth = 1.0f;
+        rs.depthBiasEnable = shadow;
+        rs.depthBiasConstantFactor = 1.0f;
+        rs.depthBiasSlopeFactor = 2.0f;
+        VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        ms.rasterizationSamples = samples;
+        VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        ds.depthTestEnable = !ui;
+        ds.depthWriteEnable = !ui && blendIdx == 0;
+        ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        // Motion vectors: written by depth-writing surfaces only (translucent ones keep what lies behind them). The FSR
+        // reactive mask: MAX of every surface's value.
+        VkPipelineColorBlendAttachmentState att[3] = {blends[blendIdx], blend(false, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD),
+                                                      blend(true, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_MAX)};
+        att[1].colorWriteMask = blendIdx == 0 ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT : 0;
+        att[2].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        att[2].alphaBlendOp = VK_BLEND_OP_MAX;
+        att[2].colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+        VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        cb.attachmentCount = shadow ? 0 : mv ? 3 : 1;
+        cb.pAttachments = att;
+        // Scene pipelines set depth writes per draw (bugs.exe's blended faces write depth, pc_order.h).
+        const VkDynamicState dyn[4] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
+                                       VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE};
+        VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+        dy.dynamicStateCount = ui || shadow ? 3 : 4;
+        dy.pDynamicStates = dyn;
+        VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+        const VkFormat formats[3] = {swapFormat_, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R8_UNORM};
+        ri.colorAttachmentCount = shadow ? 0 : mv ? 3 : 1;
+        ri.pColorAttachmentFormats = formats;
+        ri.depthAttachmentFormat = depthFormat_;
+        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri};
+        ci.stageCount = 2;
+        ci.pStages = st;
+        ci.pVertexInputState = &vi;
+        ci.pInputAssemblyState = &ia;
+        ci.pViewportState = &vp;
+        ci.pRasterizationState = &rs;
+        ci.pMultisampleState = &ms;
+        ci.pDepthStencilState = &ds;
+        ci.pColorBlendState = &cb;
+        ci.pDynamicState = &dy;
+        ci.layout = layout_;
+        VkPipeline p;
+        check(vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &ci, nullptr, &p), "vkCreateGraphicsPipelines");
+        return p;
+    };
+    for (int m = 0; m < 2; ++m) {
+        if (m == 1 && msaaMax_ == VK_SAMPLE_COUNT_1_BIT) break;
+        const VkSampleCountFlagBits samples = m ? msaaMax_ : VK_SAMPLE_COUNT_1_BIT;
+        for (int b = 0; b < 4; ++b) {
+            pipe3D_[m][b] = make(sv, sf, false, b, samples);
+            pipeLit_[1][0][m][b] = make(lv, mf, false, b, samples, false, 2);
+            if (rt_) pipeLit_[2][0][m][b] = make(lv, rf, false, b, samples, false, 2);
+        }
+        pipe2D_[m] = make(uv, uf, true, 1, samples);
+        pipe2DMul_[m] = make(uv, uf, true, 4, samples);
+    }
+    for (int b = 0; fsrOk_ && b < 4; ++b) { // FSR renders without MSAA
+        pipeLit_[0][1][0][b] = make(vv, vf, false, b, VK_SAMPLE_COUNT_1_BIT, false, 3);
+        pipeLit_[1][1][0][b] = make(vv, mvf, false, b, VK_SAMPLE_COUNT_1_BIT, false, 3);
+        if (rt_) pipeLit_[2][1][0][b] = make(vv, rvf, false, b, VK_SAMPLE_COUNT_1_BIT, false, 3);
+    }
+    pipeShadow_ = make(hv, hf, false, 0, VK_SAMPLE_COUNT_1_BIT, true);
+    for (VkShaderModule s : {sv, sf, uv, uf, lv, mf, rf, hv, hf, vv, vf, mvf, rvf}) vkDestroyShaderModule(device_, s, nullptr);
+}
+
+// ---------------------------------------------------------------- swapchain
+
+void Renderer::destroySwapchain() {
+    for (VkImageView v : swapViews_) vkDestroyImageView(device_, v, nullptr);
+    for (VkSemaphore s : presentReady_) vkDestroySemaphore(device_, s, nullptr);
+    swapViews_.clear();
+    presentReady_.clear();
+    swapImages_.clear();
+    destroy(depth_);
+    destroy(msaaColor_);
+    destroy(msaaDepth_);
+    if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+    swapchain_ = VK_NULL_HANDLE;
+}
+
+void Renderer::recreateSwapchain() {
+    waitIdle();
+    VkSurfaceCapabilitiesKHR caps;
+    check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu_, surface_, &caps), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    VkExtent2D ext = caps.currentExtent;
+    if (ext.width == UINT32_MAX) // Wayland: the application picks the size
+        ext = {std::clamp(uint32_t(w_), caps.minImageExtent.width, caps.maxImageExtent.width),
+               std::clamp(uint32_t(h_), caps.minImageExtent.height, caps.maxImageExtent.height)};
+    if (!ext.width || !ext.height) return; // minimized: stay dirty, frames are skipped
+
+    uint32_t n = 0;
+    check(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu_, surface_, &n, nullptr), "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    std::vector<VkPresentModeKHR> modes(n);
+    check(vkGetPhysicalDeviceSurfacePresentModesKHR(gpu_, surface_, &n, modes.data()), "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    presentMode_ = VK_PRESENT_MODE_FIFO_KHR; // always supported
+    const auto prefs = vsync_ ? std::vector{VK_PRESENT_MODE_FIFO_RELAXED_KHR}
+                              : std::vector{VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR};
+    for (VkPresentModeKHR want : prefs | std::views::reverse)
+        if (std::ranges::contains(modes, want)) presentMode_ = want;
+
+    VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    ci.surface = surface_;
+    const uint32_t want = caps.minImageCount + 1;
+    ci.minImageCount = caps.maxImageCount ? std::min(want, caps.maxImageCount) : want;
+    ci.imageFormat = swapFormat_;
+    ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    ci.imageExtent = ext;
+    ci.imageArrayLayers = 1;
+    swapReadable_ = caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (swapReadable_ ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0) |
+                    (fsrOk_ ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0); // FSR output / generated frames are copied in
+    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ci.preTransform = caps.currentTransform;
+    ci.compositeAlpha = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+                            ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                            : VkCompositeAlphaFlagBitsKHR(caps.supportedCompositeAlpha & -caps.supportedCompositeAlpha);
+    ci.presentMode = presentMode_;
+    ci.clipped = VK_TRUE;
+    ci.oldSwapchain = swapchain_;
+    VkSwapchainKHR sc;
+    check(vkCreateSwapchainKHR(device_, &ci, nullptr, &sc), "vkCreateSwapchainKHR");
+    destroySwapchain();
+    swapchain_ = sc;
+    extent_ = ext;
+    swapW_ = w_;
+    swapH_ = h_;
+    swapVsync_ = vsync_;
+
+    check(vkGetSwapchainImagesKHR(device_, swapchain_, &n, nullptr), "vkGetSwapchainImagesKHR");
+    swapImages_.resize(n);
+    check(vkGetSwapchainImagesKHR(device_, swapchain_, &n, swapImages_.data()), "vkGetSwapchainImagesKHR");
+    for (VkImage img : swapImages_) {
+        swapViews_.push_back(newView(img, swapFormat_, VK_IMAGE_ASPECT_COLOR_BIT, 1));
+        VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        check(vkCreateSemaphore(device_, &sci, nullptr, &presentReady_.emplace_back()), "vkCreateSemaphore");
+    }
+    // TRANSFER_SRC: the Enhanced water copies the opaque scene's depth (drawScene).
+    depth_ = makeTarget(depthFormat_, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    if (msaaMax_ > VK_SAMPLE_COUNT_1_BIT) {
+        msaaColor_ = makeTarget(swapFormat_, msaaMax_, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+        msaaDepth_ = makeTarget(depthFormat_, msaaMax_, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+    }
+    swapDirty_ = false;
+}
+
+void Renderer::setVsync(bool on) { vsync_ = on; }
+
+void Renderer::setFullscreen(bool on) { SDL_SetWindowFullscreen(window_, on); }
+
+// ---------------------------------------------------------------- scene
+
+void Renderer::freeScene() {
+    for (uint32_t s : sceneSlots_)
+        if (s != kNoSlot) freeSlot(s);
+    sceneSlots_.clear();
+    texSlot_.clear();
+    texAnims_.clear();
+    meshes_.clear();
+    sceneMeshCount_ = 0;
+    actorVerts_.clear();
+    actorIdx_.clear();
+    actorLayout_.clear();
+    prevActorLayout_.clear();
+    prevValid_ = false;
+    destroy(sceneVbo_);
+    destroy(sceneIbo_);
+    destroy(sceneNrm_);
+    destroy(sceneBlas_);
+    sceneGeos_.clear();
+    actorGeos_.clear();
+    if (sceneMem_) vkFreeMemory(device_, sceneMem_, nullptr);
+    sceneMem_ = VK_NULL_HANDLE;
+}
+
+void Renderer::addMeshes(std::span<const Mesh> ms, bool actor, size_t casters, std::vector<Vertex>& verts, std::vector<uint32_t>& idx) {
+    for (size_t i = 0; i < ms.size(); ++i) {
+        const Mesh& m = ms[i];
+        if (m.vertices.empty() || m.indices.empty()) continue;
+        glm::vec3 lo(m.vertices[0].pos[0], m.vertices[0].pos[1], m.vertices[0].pos[2]), hi = lo;
+        for (const Vertex& v : m.vertices) {
+            lo = glm::min(lo, glm::vec3(v.pos[0], v.pos[1], v.pos[2]));
+            hi = glm::max(hi, glm::vec3(v.pos[0], v.pos[1], v.pos[2]));
+        }
+        const uint32_t tex = m.texture >= 0 && size_t(m.texture) < texSlot_.size() ? texSlot_[size_t(m.texture)] : kSlotWhite;
+        const bool animOk = m.textureAnim >= 0 && size_t(m.textureAnim) < texAnims_.size() && !texAnims_[size_t(m.textureAnim)].frames.empty();
+        // Sun shadows: TB sky domes (Mesh::background) and HUD models neither cast nor receive; additive /
+        // subtractive glows only add light; translucent surfaces receive but do not cast.
+        const bool world = !m.background && (actor ? i < casters : !m.name.starts_with("sky"));
+        const bool solid = m.blend == Blend::Opaque || m.blend == Blend::AlphaTest;
+        meshes_.push_back({tex, m.blend, m.twoSided, actor, world && solid, world && (solid || m.blend == Blend::Alpha), int32_t(verts.size()),
+                           uint32_t(idx.size()), uint32_t(m.indices.size()), (lo + hi) * 0.5f, animOk ? m.textureAnim : -1, 0,
+                           // FSR reactive: LiT type-4 sprite effects (apps/bbtime poseActors names them) and animated textures
+                           (actor && m.name == "sprite") || animOk, m.zone, false});
+        meshes_.back().late = m.late;
+        meshes_.back().background = m.background;
+        meshes_.back().farClip = m.farClip;
+        meshes_.back().fogEnd = m.fogEnd;
+        meshes_.back().tris = render::triCentroids(m);
+        meshes_.back().unitUv = std::ranges::all_of(m.vertices, [](const Vertex& v) {
+            return v.uv[0] >= -1e-4f && v.uv[0] <= 1.0001f && v.uv[1] >= -1e-4f && v.uv[1] <= 1.0001f;
+        });
+        if (actor) actorLayout_.push_back(uint32_t(m.vertices.size()));
+        if (!actor && world && solid) {
+            casterLo_ = glm::min(casterLo_, lo);
+            casterHi_ = glm::max(casterHi_, hi);
+        }
+        verts.insert(verts.end(), m.vertices.begin(), m.vertices.end());
+        idx.insert(idx.end(), m.indices.begin(), m.indices.end());
+    }
+}
+
+void Renderer::setActorMeshes(std::span<const Mesh> ms, size_t shadowCasters) {
+    meshes_.resize(sceneMeshCount_);
+    // Motion vectors pair this call's vertices with the previous call's (same mesh layout = same posed models).
+    std::swap(prevActorVerts_, actorVerts_);
+    std::swap(prevActorLayout_, actorLayout_);
+    actorVerts_.clear();
+    actorIdx_.clear();
+    actorLayout_.clear();
+    actorNrm_.clear(); // computed by drawScene when a lit / motion-vector pipeline needs it
+    addMeshes(ms, true, shadowCasters, actorVerts_, actorIdx_);
+}
+
+// One BLAS triangle geometry for mesh m (vertex buffer at vtx, index buffer at idx) and its scene.frag Geo entry.
+void Renderer::blasGeometry(const GpuMesh& m, VkDeviceAddress vtx, VkDeviceAddress idx, uint32_t maxVertex,
+                            std::vector<VkAccelerationStructureGeometryKHR>& geoms,
+                            std::vector<VkAccelerationStructureBuildRangeInfoKHR>& ranges, std::vector<RtGeo>& table) const {
+    VkAccelerationStructureGeometryKHR g{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    g.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    // Alpha-tested casters stay non-opaque: scene.frag's ray loop tests their texel alpha.
+    g.flags = m.blend == Blend::Opaque ? VK_GEOMETRY_OPAQUE_BIT_KHR : VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+    auto& t = g.geometry.triangles;
+    t.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    t.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    t.vertexData.deviceAddress = vtx;
+    t.vertexStride = sizeof(Vertex);
+    t.maxVertex = maxVertex;
+    t.indexType = VK_INDEX_TYPE_UINT32;
+    t.indexData.deviceAddress = idx;
+    geoms.push_back(g);
+    ranges.push_back({m.indexCount / 3, m.firstIndex * uint32_t(sizeof(uint32_t)), uint32_t(m.baseVertex), 0});
+    table.push_back({vtx, idx, m.firstIndex, m.baseVertex, m.texture, 0});
+}
+
+// Builds (or rebuilds) `out` from geoms/ranges, growing its buffer and `scratch` as needed. Recorded into cb; the
+// caller orders it before readers. `out`'s previous structure must no longer be in use.
+void Renderer::buildAccel(VkCommandBuffer cb, VkAccelerationStructureTypeKHR type, std::span<const VkAccelerationStructureGeometryKHR> geoms,
+                          std::span<const VkAccelerationStructureBuildRangeInfoKHR> ranges, bool fastBuild, Frame::Accel& out,
+                          Buffer& scratch) {
+    VkAccelerationStructureBuildGeometryInfoKHR bi{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    bi.type = type;
+    bi.flags = fastBuild ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    bi.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    bi.geometryCount = uint32_t(geoms.size());
+    bi.pGeometries = geoms.data();
+    std::vector<uint32_t> counts;
+    for (const auto& r : ranges) counts.push_back(r.primitiveCount);
+    VkAccelerationStructureBuildSizesInfoKHR sz{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    vkASSizes_(device_, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &bi, counts.data(), &sz);
+    if (out.as) vkDestroyAS_(device_, out.as, nullptr);
+    out.as = VK_NULL_HANDLE;
+    growBuffer(out.buf, sz.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+    VkAccelerationStructureCreateInfoKHR ci{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    ci.buffer = out.buf.buf;
+    ci.size = sz.accelerationStructureSize;
+    ci.type = type;
+    check(vkCreateAS_(device_, &ci, nullptr, &out.as), "vkCreateAccelerationStructureKHR");
+    growBuffer(scratch, sz.buildScratchSize + scratchAlign_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false,
+               &frames_[frame_].garbage);
+    bi.dstAccelerationStructure = out.as;
+    bi.scratchData.deviceAddress = (address(scratch.buf) + scratchAlign_ - 1) / scratchAlign_ * scratchAlign_;
+    const VkAccelerationStructureBuildRangeInfoKHR* pr = ranges.data();
+    vkCmdBuildAS_(cb, 1, &bi, &pr);
+}
+
+// Ray-traced reflections (Enhanced): neither game has material data beyond texture + blend mode, so reflective surfaces
+// are picked from them (docs/ROADMAP.md "Enhanced sun shadows and ray tracing"):
+// the surface colour = texture mean (opaque texels) x mean vertex colour x Scene::colorScale (TB textures are grey and
+// coloured by their vertices), contrast = the texture's luma standard deviation.
+// - water: translucent (Alpha / Additive) or animated surfaces whose colour is blue-dominant -> strength 0.6, roughness
+//   0.03 (LiT L02A1 / L03A water, TB VIQ01 ice water); also GpuMesh::water, the Enhanced stylised water (Settings::water);
+// - ice: opaque, strongly blue (b > 1.5 r, b > 1.25 g), luma > 0.55, contrast < 0.1 -> strength 0.35, roughness 0.05 (TB VICASG01);
+// - polished floor: opaque, luma > 0.6, saturation < 0.25, contrast < 0.1 -> strength 0.25, roughness 0.08 (TB ARCA01
+//   marble square, AZBOSS01).
+// All only on surfaces facing up (area-weighted mean face normal y > 0.9) covering > 4 character units² of area (the
+// navy-plane water candidates at any size; uploadScene's rules then keep or drop every candidate).
+std::vector<glm::vec3> Renderer::reflectiveMaterials(const Scene& scene) {
+    struct Stat { glm::vec3 mean{0.0f}; float sat = 0.0f, contrast = 0.0f; bool ok = false; };
+    std::vector<Stat> tex(scene.textures.size());
+    auto stat = [&](int32_t t) -> const Stat& {
+        static const Stat none;
+        if (t < 0 || size_t(t) >= tex.size()) return none;
+        Stat& st = tex[size_t(t)];
+        const Texture& x = scene.textures[size_t(t)];
+        if (st.ok || x.rgba.empty()) return st;
+        double sum[3] = {}, sum2 = 0, n = 0;
+        for (size_t i = 0; i + 3 < x.rgba.size(); i += 4) {
+            if (x.rgba[i + 3] < 128) continue;
+            const float r = x.rgba[i] / 255.0f, g = x.rgba[i + 1] / 255.0f, b = x.rgba[i + 2] / 255.0f, l = 0.299f * r + 0.587f * g + 0.114f * b;
+            sum[0] += r, sum[1] += g, sum[2] += b, sum2 += double(l) * l, n += 1;
+        }
+        if (n > 0) {
+            st.mean = glm::vec3(float(sum[0] / n), float(sum[1] / n), float(sum[2] / n));
+            const float l = 0.299f * st.mean.r + 0.587f * st.mean.g + 0.114f * st.mean.b;
+            st.contrast = std::sqrt(std::max(0.0, sum2 / n - double(l) * l));
+            st.sat = std::max({st.mean.r, st.mean.g, st.mean.b}) - std::min({st.mean.r, st.mean.g, st.mean.b});
+        }
+        st.ok = true;
+        return st;
+    };
+    const bool dump = std::getenv("BBTIME_VK_MATERIALS") != nullptr;
+    size_t k = 0;
+    std::vector<glm::vec3> seaTris;                          // opaque water planes (Enhanced water)
+    std::vector<GpuMesh*> planes;
+    std::vector<std::pair<GpuMesh*, const Mesh*>> layers;    // translucent / animated water layers
+    std::vector<glm::vec3> tint;                             // per scene mesh: its texture's mean colour (opaque texels)
+    for (const Mesh& m : scene.meshes) {
+        if (m.vertices.empty() || m.indices.empty()) continue;
+        GpuMesh& g = meshes_[k++];
+        tint.push_back(m.texture >= 0 && stat(m.texture).ok ? stat(m.texture).mean : glm::vec3(1.0f));
+        glm::vec3 nsum(0.0f);
+        float area = 0.0f;
+        for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+            auto p = [&](size_t j) { const Vertex& v = m.vertices[m.indices[i + j]]; return glm::vec3(v.pos[0], v.pos[1], v.pos[2]); };
+            const glm::vec3 c = glm::cross(p(1) - p(0), p(2) - p(0));
+            nsum += c * 0.5f;
+            area += glm::length(c) * 0.5f;
+        }
+        const float up = area > 0.0f ? (m.twoSided ? std::abs(nsum.y) : nsum.y) / area : 0.0f; // two-sided: either side up
+        if (up < 0.85f || m.name.starts_with("sky")) continue;
+        const bool flat = up >= 0.9f;  // sloped (0.85..0.9): only the navy rule below, as a stream bed (LiT L02A5)
+        const bool big = area >= 4.0f * kCharUnit * kCharUnit;  // small navy pieces still join the water planes (L03A strips)
+        // Animated surfaces: the mean over their frames (some start on an empty frame).
+        Stat st;
+        int32_t t = m.texture;
+        if (m.textureAnim >= 0 && size_t(m.textureAnim) < scene.textureAnims.size() && !scene.textureAnims[size_t(m.textureAnim)].frames.empty()) {
+            const auto& frames = scene.textureAnims[size_t(m.textureAnim)].frames;
+            t = frames[0];
+            for (int32_t f : frames) {
+                const Stat& x = stat(f);
+                st.mean += x.mean / float(frames.size());
+                st.contrast += x.contrast / float(frames.size());
+            }
+        } else {
+            st = stat(t);
+        }
+        glm::vec3 vc(0.0f); // the surface colour the player sees: texture mean x vertex colour mean (TB textures are grey)
+        for (const Vertex& v : m.vertices) vc += glm::vec3(v.rgba[0], v.rgba[1], v.rgba[2]) / 255.0f;
+        vc /= float(m.vertices.size());
+        const glm::vec3 c = glm::min(st.mean * vc * scene.colorScale, glm::vec3(1.0f));
+        const float luma = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
+        const float sat = std::max({c.r, c.g, c.b}) - std::min({c.r, c.g, c.b});
+        float strength = 0.0f, rough = 0.0f;
+        // The stylised water's colour (scene.frag shadeWater): what an opaque surface shows, or the light an additive
+        // one adds (a = 0); an alpha-blended sheen's colour mixes with an unknown bed, so it keeps the stylised default.
+        if (m.blend != Blend::Alpha) g.tint = glm::packUnorm4x8(glm::vec4(c, m.blend == Blend::Additive ? 0.0f : 1.0f));
+        if (flat && big && (m.blend == Blend::Alpha || m.blend == Blend::Additive || (m.textureAnim >= 0 && m.blend != Blend::Subtract)) && c.b > c.r * 1.15f &&
+            c.b > c.g * 0.95f)
+            strength = 0.6f, rough = 0.03f, g.water = luma < 0.55f; // brighter: ice (renderer.cpp uploadScene)
+        else if (flat && big && m.blend == Blend::Opaque && st.contrast < 0.1f && luma > 0.55f && c.b > c.r * 1.5f && c.b > c.g * 1.25f) strength = 0.35f, rough = 0.05f;
+        else if (flat && big && m.blend == Blend::Opaque && luma > 0.6f && sat < 0.25f && st.contrast < 0.1f) strength = 0.25f, rough = 0.08f;
+        // Enhanced water only (no reflection material): the flat dark-blue planes the games draw as open water / river
+        // beds under their translucent sheen (LiT L03A sea, L02A1 river), and the sloped one of a stream running between
+        // its animated rim strips (LiT L02A5: the stylised water is drawn on it as it lies, never a plane or fill).
+        // c.b < 0.75: not saturated blue glass (L02A1 / CC2A castle window tex157, 0.05 0.05 1.0).
+        else if (m.blend == Blend::Opaque && m.textureAnim < 0 && st.contrast < 0.02f && luma < 0.25f && c.b > 0.1f && c.b < 0.75f && c.b > c.r * 1.8f &&
+                 c.b > c.g * 1.6f)
+            g.water = true, g.slope = !flat;
+        if (g.water && m.blend == Blend::Opaque && flat) {
+            planes.push_back(&g);
+            for (uint32_t i : m.indices) seaTris.push_back({m.vertices[i].pos[0], m.vertices[i].pos[1], m.vertices[i].pos[2]});
+        } else if (g.water && m.blend != Blend::Opaque) {
+            layers.emplace_back(&g, &m);
+        }
+        if (dump && (big || g.water))
+            std::println(stderr, "material {} blend {} anim {} area {:.0f} up {:.2f} centre {:.0f} {:.0f} {:.0f} tex {} rgb {:.2f} {:.2f} {:.2f} "
+                         "vertex {:.2f} {:.2f} {:.2f} sat {:.2f} contrast {:.3f} -> {}", m.name, int(m.blend), m.textureAnim, area, up,
+                         g.center.x, g.center.y, g.center.z, t, c.r, c.g, c.b, vc.r, vc.g, vc.b, sat, st.contrast, strength);
+        if (strength > 0.0f) g.material = glm::packHalf2x16(glm::vec2(strength, rough));
+    }
+    // Translucent layers over an opaque water plane: well above it (L02A1's sheen 500 units over the river's navy floor)
+    // they are the surface and the plane is its bed; a little above it (L03A's 880 layer over the sea at 800) they are
+    // sheen the stylised sea replaces (GpuMesh::sheen, not drawn with it); coplanar ones are part of the surface.
+    render::WaterSurfaces sea;
+    sea.build(seaTris, {});
+    std::vector<float> beds;
+    for (auto [g, m] : layers) {
+        float above = -1e9f, bed = 0.0f;
+        for (const Vertex& v : m->vertices)
+            if (const auto h = sea.height({v.pos[0], v.pos[2]}); h && v.pos[1] - *h > above) above = v.pos[1] - *h, bed = *h;
+        if (above > 200.0f) beds.push_back(bed);
+        else if (above > 20.0f) g->sheen = true, g->water = false;
+    }
+    for (GpuMesh* g : planes)
+        if (std::ranges::any_of(beds, [&](float b) { return std::abs(g->center.y - b) < 10.0f; })) g->water = false, g->bed = true;
+    return tint;
+}
+
+void Renderer::uploadScene(const Scene& scene) {
+    waitIdle();
+    freeScene();
+    colorScale_ = scene.colorScale;
+    texGamma_ = scene.pcTexGamma;
+    linearOriginal_ = scene.game == GameId::LostInTime;
+    sunPending_ = true;
+
+    std::vector<std::vector<uint8_t>> bled;
+    std::vector<TexSrc> srcs;
+    std::vector<int> srcOf(scene.textures.size(), -1);
+    VkDeviceSize bytes = 0;
+    for (size_t i = 0; i < scene.textures.size(); ++i) {
+        const Texture& t = scene.textures[i];
+        if (!t.width || !t.height || t.rgba.size() != size_t(t.width) * t.height * 4) continue;
+        const uint8_t* px = t.rgba.data();
+        if (t.hasAlpha) px = bled.emplace_back(render::bleedTransparent(t)).data();
+        srcOf[i] = int(srcs.size());
+        srcs.push_back({t.width, t.height, px});
+        bytes += t.rgba.size();
+    }
+    for (const Mesh& m : scene.meshes) bytes += !m.vertices.empty() && !m.indices.empty();
+    if (!bytes) return;
+
+    Buffer staging = makeBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    VkCommandBuffer cb = beginOneShot();
+    VkDeviceSize off = 0;
+    sceneMem_ = createTextures(cb, staging, off, srcs, true, sceneSlots_);
+    uint32_t full = 0;
+    for (int s : srcOf) {
+        const uint32_t slot = s < 0 ? kSlotWhite : sceneSlots_[size_t(s)];
+        full += slot == kNoSlot;
+        texSlot_.push_back(slot == kNoSlot ? kSlotWhite : slot);
+    }
+    if (full) std::println(stderr, "vk: bindless table full ({} slots): {} textures drawn white", maxSlots_, full);
+    for (const TextureAnim& a : scene.textureAnims) {
+        TexAnim& g = texAnims_.emplace_back(TexAnim{{}, a.startFrame, std::max(a.holdTicks, 1u)});
+        for (int32_t f : a.frames) g.frames.push_back(f >= 0 && size_t(f) < texSlot_.size() ? texSlot_[size_t(f)] : kSlotWhite);
+    }
+
+    std::vector<Vertex> verts;
+    std::vector<uint32_t> idx;
+    casterLo_ = glm::vec3(std::numeric_limits<float>::max());
+    casterHi_ = -casterLo_;
+    addMeshes(scene.meshes, false, SIZE_MAX, verts, idx);
+    sceneMeshCount_ = meshes_.size();
+    zones_ = scene.zones;
+    const std::vector<glm::vec3> tint = reflectiveMaterials(scene);
+    {   // Enhanced water: surface heights + shore walls (ground = the opaque / alpha-tested world) and a fresh wave field
+        std::vector<glm::vec3> water, ground;
+        // Share of the rim of the level's ground (sampled every fill cell, half a cell inside its bounding box) that is
+        // water in w: a sea around the level (L03A, CC3A) lines a good share of it, a pond / floor tile hardly any.
+        constexpr float kFillCell = 150.0f;
+        const glm::vec2 cLo(casterLo_.x, casterLo_.z), cHi(casterHi_.x, casterHi_.z);
+        auto rimShare = [&](const render::WaterSurfaces& w) {
+            int rim = 0, wet = 0;
+            const float dt = kFillCell / std::max({cHi.x - cLo.x, cHi.y - cLo.y, kFillCell});
+            for (float t = 0.5f * dt; t < 1.0f; t += dt)
+                for (const glm::vec2 p : {glm::mix(cLo, glm::vec2(cHi.x, cLo.y), t), glm::mix(glm::vec2(cHi.x, cLo.y), cHi, t),
+                                          glm::mix(cHi, glm::vec2(cLo.x, cHi.y), t), glm::mix(glm::vec2(cLo.x, cHi.y), cLo, t)})
+                    ++rim, wet += w.height(glm::clamp(p, cLo + 0.5f * kFillCell, cHi - 0.5f * kFillCell)).has_value();
+            return rim ? float(wet) / float(rim) : 0.0f;
+        };
+        for (const GpuMesh& m : meshes_)
+            if (m.caster)
+                for (uint32_t i = 0; i < m.indexCount; ++i) {
+                    const Vertex& v = verts[size_t(int64_t(idx[m.firstIndex + i]) + m.baseVertex)];
+                    ground.push_back({v.pos[0], v.pos[1], v.pos[2]});
+                }
+        {   // Static (non-animated) translucent "water" with no ground under most of it is a glass / energy floor over a
+            // void or over its own coplanar navy backing (LiT space era CC5A / L05A2 grid floors), not water: real
+            // translucent water lies over a bed or is animated (L03A, L02A1, TB VIQ01). Each layer needs a bed under most
+            // of it and so do all static layers of its texture together: a few layers of a night mist bank reaching over
+            // the mountain's foot are not water either (LiT L01D1: 2 of its 40 additive mist layers have ground under them).
+            // Bright translucent cyan (luma > 0.55) is ice (L02C1 / L02C3 frozen valley), not water.
+            std::map<int, render::WaterSurfaces> below;  // ground reaching under a height (beds up their banks; no ceilings)
+            std::map<uint32_t, glm::ivec2> byTex;        // per texture: samples with a bed under them, all samples
+            std::vector<std::pair<GpuMesh*, glm::ivec2>> statics;  // the same per layer
+            for (size_t k = 0; k < sceneMeshCount_; ++k) {
+                GpuMesh& m = meshes_[k];
+                if (!m.water || (m.blend != Blend::Alpha && m.blend != Blend::Additive) || m.textureAnim >= 0) continue;
+                statics.emplace_back(&m, glm::ivec2(0));
+                const int h = int(std::lround(m.center.y));
+                auto [it, fresh] = below.try_emplace(h);
+                if (fresh) {
+                    std::vector<glm::vec3> tris;
+                    for (size_t i = 0; i + 2 < ground.size(); i += 3)
+                        if (std::min({ground[i].y, ground[i + 1].y, ground[i + 2].y}) < float(h) - 5.0f) tris.insert(tris.end(), &ground[i], &ground[i + 3]);
+                    it->second.build(tris, {});
+                }
+                glm::ivec2& s = statics.back().second;  // samples with ground 5..1000 units below (not its coplanar backing, not a far floor)
+                for (uint32_t i = 0; i + 2 < m.indexCount; i += 3) {
+                    glm::vec3 c(0.0f);
+                    for (uint32_t j = 0; j < 3; ++j) {
+                        const Vertex& v = verts[size_t(int64_t(idx[m.firstIndex + i + j]) + m.baseVertex)];
+                        c += glm::vec3(v.pos[0], v.pos[1], v.pos[2]) / 3.0f;
+                    }
+                    const auto g = it->second.height({c.x, c.z});
+                    s += glm::ivec2(g && c.y - *g > 5.0f && c.y - *g < 1000.0f, 1);
+                }
+                byTex[m.texture] += s;
+            }
+            for (auto [m, s] : statics) {
+                // Level with animated water it is that water's surface (CCMERLIN moat: static teal over a void, ringed
+                // by animated shore strips); glass floors have no animated water anywhere near their height.
+                const bool withAnimated = std::ranges::any_of(std::span(meshes_).first(sceneMeshCount_), [&](const GpuMesh& w) {
+                    return w.water && w.textureAnim >= 0 && std::abs(w.center.y - m->center.y) < 20.0f;
+                });
+                const glm::ivec2 t = byTex[m->texture];
+                if ((2 * s.x < s.y || 2 * t.x < t.y) && !withAnimated) m->water = false;
+            }
+            // A static opaque navy plane is water only under a remaining translucent / animated water layer (coplanar or
+            // up to 200 units over it, L03A sea) or when the lone planes form an open sea: one height, the level's lowest
+            // ground (nothing below them) and >= 10% of its ground's bounding area (CC3A). Else it is a floor tile (space
+            // era L05A5 / L05A2 platforms, L01D2_8 moonlit rock, L04C1 factory floor) and stays as drawn. Animated opaque
+            // blue is a water surface itself (L04E2 park pond, l04e, TB AZCASG05).
+            std::vector<GpuMesh*> lone;
+            float loneArea = 0.0f, ylo = std::numeric_limits<float>::max(), yhi = -ylo;
+            for (size_t k = 0; k < sceneMeshCount_; ++k) {
+                GpuMesh& p = meshes_[k];
+                if (!p.water || p.blend != Blend::Opaque || p.textureAnim >= 0) continue;
+                glm::vec3 lo(std::numeric_limits<float>::max()), hi(-std::numeric_limits<float>::max());
+                for (uint32_t i = 0; i < p.indexCount; ++i) {
+                    const Vertex& v = verts[size_t(int64_t(idx[p.firstIndex + i]) + p.baseVertex)];
+                    lo = glm::min(lo, glm::vec3(v.pos[0], v.pos[1], v.pos[2])), hi = glm::max(hi, glm::vec3(v.pos[0], v.pos[1], v.pos[2]));
+                }
+                bool covered = false;
+                for (size_t j = 0; j < sceneMeshCount_ && !covered; ++j) {
+                    const GpuMesh& l = meshes_[j];
+                    if (!l.water || l.blend == Blend::Opaque) continue;
+                    for (uint32_t i = 0; i < l.indexCount && !covered; ++i) {
+                        const Vertex& v = verts[size_t(int64_t(idx[l.firstIndex + i]) + l.baseVertex)];
+                        covered = v.pos[0] >= lo.x - kCharUnit && v.pos[0] <= hi.x + kCharUnit && v.pos[2] >= lo.z - kCharUnit &&
+                                  v.pos[2] <= hi.z + kCharUnit && v.pos[1] >= hi.y - 20.0f && v.pos[1] <= hi.y + 200.0f;
+                    }
+                }
+                if (covered) continue;
+                if (p.slope) {  // a sloped navy bed is a stream only under its water strips
+                    p.water = false;
+                    continue;
+                }
+                lone.push_back(&p);
+                ylo = std::min(ylo, p.center.y), yhi = std::max(yhi, p.center.y);
+                for (uint32_t i = 0; i + 2 < p.indexCount; i += 3) {
+                    auto q = [&](uint32_t j) { const Vertex& v = verts[size_t(int64_t(idx[p.firstIndex + i + j]) + p.baseVertex)]; return glm::vec3(v.pos[0], v.pos[1], v.pos[2]); };
+                    loneArea += 0.5f * glm::length(glm::cross(q(1) - q(0), q(2) - q(0)));
+                }
+            }
+            bool sea = !lone.empty() && yhi - ylo < 20.0f && loneArea >= 0.1f * (cHi.x - cLo.x) * (cHi.y - cLo.y);
+            if (sea) {
+                render::WaterSurfaces top;
+                top.build(ground, {});
+                int n = 0, lower = 0;
+                for (float z = cLo.y + 0.5f * kFillCell; z < cHi.y; z += kFillCell)
+                    for (float x = cLo.x + 0.5f * kFillCell; x < cHi.x; x += kFillCell)
+                        if (const auto g = top.height({x, z})) ++n, lower += *g < ylo - 20.0f;
+                sea = lower * 50 < n;  // < 2%: stray low props
+            }
+            if (std::getenv("BBTIME_VK_MATERIALS") && !lone.empty())
+                std::println(stderr, "lone navy planes {} y {:.0f}..{:.0f} area share {:.3f} -> {}", lone.size(), ylo, yhi,
+                             loneArea / std::max((cHi.x - cLo.x) * (cHi.y - cLo.y), 1.0f), sea ? "open sea" : "floor");
+            for (GpuMesh* p : lone)  // at the height of real water or up to 200 under it: its sea / bed (L03A 800, L03ACOM 928)
+                p->water = sea || std::ranges::any_of(std::span(meshes_).first(sceneMeshCount_), [&](const GpuMesh& w) {
+                    return w.water && !std::ranges::contains(lone, &w) && w.center.y - p->center.y > -20.0f && w.center.y - p->center.y < 200.0f;
+                });
+            if (std::getenv("BBTIME_VK_MATERIALS"))  // final classification, after the rules above
+                for (size_t k = 0; k < sceneMeshCount_; ++k)
+                    if (const GpuMesh& g = meshes_[k]; g.water || g.sheen || g.bed)
+                        std::println(stderr, "{} centre {:.0f} {:.0f} {:.0f} blend {}", g.water ? "water" : g.sheen ? "sheen" : "bed", g.center.x,
+                                     g.center.y, g.center.z, int(g.blend));
+        }
+        ground.clear();
+        glm::vec2 lo(std::numeric_limits<float>::max()), hi(-std::numeric_limits<float>::max());
+        std::map<int, float> seaArea;  // opaque water planes: area by height (10-unit steps)
+        std::map<int, glm::vec4> seaTint;  // ... and their area x GpuMesh::tint
+        glm::vec3 seaColor(0.0f);
+        float seaTotal = 0.0f;
+        std::vector<glm::vec3> slopeTris;  // sloped stream beds: water surface heights, but no part in the fill rules
+        for (const GpuMesh& m : meshes_) {
+            const bool solid = m.caster;  // opaque / alpha-tested world, not the sky
+            if (!m.water && !solid) continue;
+            for (uint32_t i = 0; i < m.indexCount; ++i) {
+                const Vertex& v = verts[size_t(int64_t(idx[m.firstIndex + i]) + m.baseVertex)];
+                (m.water && m.slope ? slopeTris : m.water ? water : ground).push_back({v.pos[0], v.pos[1], v.pos[2]});
+                if (m.water) lo = glm::min(lo, glm::vec2(v.pos[0], v.pos[2])), hi = glm::max(hi, glm::vec2(v.pos[0], v.pos[2]));
+            }
+            if (!m.water || m.slope) continue;
+            for (uint32_t i = 0; i + 2 < m.indexCount; i += 3) {
+                const Vertex* t[3];
+                for (uint32_t j = 0; j < 3; ++j) t[j] = &verts[size_t(int64_t(idx[m.firstIndex + i + j]) + m.baseVertex)];
+                auto p = [&](int j) { return glm::vec3(t[j]->pos[0], t[j]->pos[1], t[j]->pos[2]); };
+                const float a = 0.5f * glm::length(glm::cross(p(1) - p(0), p(2) - p(0)));
+                seaArea[int(std::lround(p(0).y / 10.0f))] += a;
+                seaTint[int(std::lround(p(0).y / 10.0f))] += a * glm::unpackUnorm4x8(m.tint);
+                seaColor += a * glm::vec3(t[0]->rgba[0], t[0]->rgba[1], t[0]->rgba[2]);
+                seaTotal += a;
+            }
+        }
+        // Open water where the level has no surface mesh (LiT L03A: the sea is the sky dome's lower half; L02A1: the
+        // river's middle shows its navy bed, and a hole in it): a plane at the main water height, drawn first so the
+        // level's own water overwrites it. Only over the opaque water planes / beds (+2 character units), and there only
+        // in 150-unit cells that are open or already water (see wetAt), so it never floods dry ground below it; a sea
+        // (water lining the level's rim) fills the whole level area and runs to the horizon.
+        seaFill_ = SIZE_MAX;
+        std::vector<glm::vec3> planeTris, bedTris;
+        glm::vec2 pLo(std::numeric_limits<float>::max()), pHi(-std::numeric_limits<float>::max());
+        for (const GpuMesh& m : meshes_)
+            if ((m.water && m.blend == Blend::Opaque && !m.slope) || m.bed)
+                for (uint32_t i = 0; i < m.indexCount; ++i) {
+                    const Vertex& v = verts[size_t(int64_t(idx[m.firstIndex + i]) + m.baseVertex)];
+                    (m.bed ? bedTris : planeTris).push_back({v.pos[0], v.pos[1], v.pos[2]});
+                    pLo = glm::min(pLo, glm::vec2(v.pos[0], v.pos[2])), pHi = glm::max(pHi, glm::vec2(v.pos[0], v.pos[2]));
+                }
+        bool holeFill = false;  // the fill closes holes around plane-less water layers (below)
+        bool openSea = false;   // ... and they are a sea open to the horizon
+        bool rimFill = false;   // ... or rim strips along the banks of a channel whose middle shows its deep bed
+        if (pLo.x > pHi.x && seaTotal > 0.0f) {
+            // No planes / beds: TB draws its water as additive surf / ripple layers around holes the backdrop shows
+            // through (TRCA01 moat, VIQ02 / VICA01 sea; LiT L03A2's sea), so the layers alone would be bands around a
+            // void. Where a quarter of the layers at the main water height has no ground at all under it, the fill
+            // closes the holes (not over a mist / road strip with ground under it: LiT L02B1 / L02B2, nor a lagoon over
+            // its bed: L03C), from those layers' area (CC2A: not its pond 3600 units lower) and in the level's open cells.
+            // So it does when the layers are surf lines on the cliffs of an island in an open sea (TB VIQ01: ground
+            // under all of them, the void past them), see openSea.
+            // Not when a static (non-animated) layer lies at that height: that is the game's own surface and its gaps
+            // are deliberate (LiT CCMERLIN / Merlin moat: the drawbridge actor lies in one); surf lines are animated.
+            const float y = 10.0f * float(std::ranges::max_element(seaArea, {}, &std::pair<const int, float>::second)->first);
+            std::vector<glm::vec3> under(slopeTris);  // ground reaching below the water (not bridges / canopies over it), stream beds
+            for (size_t i = 0; i + 2 < ground.size(); i += 3)
+                if (std::min({ground[i].y, ground[i + 1].y, ground[i + 2].y}) < y + 5.0f) under.insert(under.end(), &ground[i], &ground[i + 3]);
+            render::WaterSurfaces dry;
+            dry.build(under, {});
+            int n = 0, holes = 0;
+            glm::vec2 wLo = pLo, wHi = pHi;
+            for (size_t i = 0; i + 2 < water.size(); i += 3) {
+                const glm::vec3 c = (water[i] + water[i + 1] + water[i + 2]) / 3.0f;
+                if (std::abs(c.y - y) > 20.0f) continue;
+                ++n, holes += !dry.height({c.x, c.z});
+                for (size_t j = i; j < i + 3; ++j) wLo = glm::min(wLo, glm::vec2(water[j].x, water[j].z)), wHi = glm::max(wHi, glm::vec2(water[j].x, water[j].z));
+            }
+            const bool surface = std::ranges::any_of(meshes_, [&](const GpuMesh& m) {
+                return m.water && m.blend != Blend::Opaque && m.textureAnim < 0 && std::abs(m.center.y - y) < 20.0f;
+            });
+            if (!surface) {
+                // Sight lines over the water: from up to 64 layer triangles, 32 directions marched in fill cells to the
+                // edge of the level's ground box, blocked by ground more than 2 character units over the water. A sea
+                // is open (> 18% of the lines reach the box edge) mostly over void (> half of their steps have no
+                // ground at all): L03A2 0.75 / 0.76, VIQ02 0.44 / 0.93, VICA01 0.24 / 0.87, VIQ01 0.24 / 0.88; a river
+                // or moat is walled in by its banks (CC2A 0.01, TRCA01 0), a pool or mist strip has ground around it
+                // (L02B1 0.11 / 0.63, L03C 0.06, AZQ01 0.02).
+                render::WaterSurfaces top;
+                top.build(ground, {});
+                const size_t every = std::max<size_t>(1, size_t(n) / 64);
+                int rays = 0, open = 0, k = 0, steps = 0, voids = 0;
+                for (size_t i = 0; i + 2 < water.size(); i += 3) {
+                    const glm::vec3 c = (water[i] + water[i + 1] + water[i + 2]) / 3.0f;
+                    if (std::abs(c.y - y) > 20.0f || k++ % every) continue;
+                    for (int d = 0; d < 32; ++d) {
+                        const glm::vec2 dir(std::cos(float(d) * 0.19635f), std::sin(float(d) * 0.19635f));
+                        glm::vec2 p(c.x, c.z);
+                        bool blocked = false;
+                        int s = 0, v = 0;
+                        while (!blocked && glm::all(glm::greaterThanEqual(p, cLo)) && glm::all(glm::lessThanEqual(p, cHi))) {
+                            const auto g = top.height(p);
+                            blocked = g && *g > y + 2.0f * kCharUnit;
+                            ++s, v += !g;
+                            p += dir * kFillCell;
+                        }
+                        ++rays, open += !blocked;
+                        if (!blocked) steps += s, voids += v;
+                    }
+                }
+                openSea = float(open) > 0.18f * float(std::max(rays, 1)) && 2 * voids > steps;
+            }
+            if ((4 * holes >= n || openSea) && !surface) {
+                pLo = wLo, pHi = wHi, holeFill = true;
+                for (GpuMesh& m : meshes_)  // the game's surf / ripple lines on the filled sea keep their glow (VIQ01 cliffs)
+                    m.surf = m.water && m.blend == Blend::Additive && std::abs(m.center.y - y) < 20.0f;
+            } else if (!surface && n > 0 && scene.game == GameId::TimeBusters &&
+                       std::ranges::none_of(scene.waterZones, [&](const auto& z) { return std::abs(z[0][1] - y) < 100.0f; })) {
+                // Neither (TB): the layers are the surf strips along the banks of a river / channel over its deep bed
+                // (VICASG04 ice cave: the bed under every strip, so no holes, the middle bare). The fill joins the
+                // strips across the bed (fillCells: channel); the strips keep their glow over it. Not LiT, whose
+                // plane-less strips over ground are mist banks over roads (L02B1 / L02B2), nor where a water zone's
+                // top lies at the layers (its fill below is the surface Bugs swims in: Granny pond, AZQ01, ARCA04).
+                pLo = wLo, pHi = wHi, rimFill = true;
+                for (GpuMesh& m : meshes_) m.surf = m.water && m.blend == Blend::Additive && std::abs(m.center.y - y) < 20.0f;
+            }
+            if (std::getenv("BBTIME_VK_MATERIALS"))
+                std::println(stderr, "plane-less water at y {:.0f}: hole share {:.2f}{}", y, float(holes) / float(std::max(n, 1)),
+                             surface ? ", static surface layer (no hole fill)" : openSea ? ", open sea" : rimFill ? ", channel" : "");
+        }
+        water.insert(water.end(), slopeTris.begin(), slopeTris.end());
+        const size_t layerTris = water.size();  // the level's own water (the fills append after it)
+        Mesh fill;
+        fill.name = "water fill";
+        fill.blend = Blend::Alpha;  // neither a caster nor in the opaque pass
+        glm::vec4 fillTint(0.0f);
+        if (seaTotal > 0.0f && pLo.x <= pHi.x) {
+            const float y = 10.0f * float(std::ranges::max_element(seaArea, {}, &std::pair<const int, float>::second)->first);
+            const glm::u8vec3 c(glm::round(seaColor / seaTotal));
+            render::WaterSurfaces top, own, beds, sheens;
+            top.build(ground, {});
+            own.build(water, {});
+            std::vector<glm::vec3> sheenTris;
+            for (const GpuMesh& m : meshes_)
+                if (m.sheen)
+                    for (uint32_t i = 0; i < m.indexCount; ++i) {
+                        const Vertex& v = verts[size_t(int64_t(idx[m.firstIndex + i]) + m.baseVertex)];
+                        sheenTris.push_back({v.pos[0], v.pos[1], v.pos[2]});
+                    }
+            sheens.build(sheenTris, {});
+            // Seabed: ground under the fill height that the game tints blue / teal (vertex light x texture: L03A rocks
+            // under the docks, L03a_8's blue texture) is a bed too, not dry ground below the water.
+            for (size_t k = 0; k < tint.size(); ++k)
+                if (const GpuMesh& m = meshes_[k]; m.caster && !m.water)
+                    for (uint32_t i = 0; i + 2 < m.indexCount; i += 3) {
+                        const Vertex* t[3];
+                        glm::vec3 col(0.0f);
+                        float low = std::numeric_limits<float>::max();
+                        for (uint32_t j = 0; j < 3; ++j) {
+                            t[j] = &verts[size_t(int64_t(idx[m.firstIndex + i + j]) + m.baseVertex)];
+                            col += glm::vec3(t[j]->rgba[0], t[j]->rgba[1], t[j]->rgba[2]) * tint[k];
+                            low = std::min(low, t[j]->pos[1]);
+                        }
+                        if (low < y - 20.0f && col.b > 1.3f * col.r && std::max(col.g, col.b) > 1.3f * col.r)
+                            for (const Vertex* v : t) bedTris.push_back({v->pos[0], v->pos[1], v->pos[2]});
+                    }
+            beds.build(bedTris, {});
+            // Water already: the level's own water at the fill height (the fill closes the cell-edge gaps along its
+            // edges), the game's sheen layer (L03A shallows), a bed. Never ground below the fill elsewhere.
+            auto wetAt = [&](glm::vec2 p, std::optional<float> g) {
+                const auto o = own.height(p), b = beds.height(p);
+                return (o && std::abs(*o - y) < 20.0f) || sheens.height(p) || (g && b && std::abs(*g - *b) < 10.0f);
+            };
+            auto quad = [&](glm::vec2 a, glm::vec2 b) {
+                const uint32_t n = uint32_t(fill.vertices.size());
+                for (const glm::vec2& q : {a, glm::vec2(b.x, a.y), b, glm::vec2(a.x, b.y)})
+                    fill.vertices.push_back({.pos = {q.x, y, q.y}, .uv = {0, 0}, .rgba = {c.r, c.g, c.b, 255}});
+                for (uint32_t k : {0u, 2u, 1u, 0u, 3u, 2u}) fill.indices.push_back(n + k);  // facing up
+                for (const glm::vec2& q : {a, glm::vec2(b.x, a.y), b, a, b, glm::vec2(a.x, b.y)}) water.push_back({q.x, y, q.y});
+            };
+            // rimFill: a cell over the bed (ground below the fill) with the level's own water strips on both sides
+            // along x or along z within 8 cells, no bank (ground over the water) or void between: the channel between
+            // the strips along its banks.
+            auto channel = [&](glm::vec2 p) {
+                auto reach = [&](glm::vec2 d) {
+                    for (int k = 1; k <= 8; ++k) {
+                        const glm::vec2 q = p + d * (float(k) * kFillCell);
+                        if (const auto o = own.height(q); o && std::abs(*o - y) < 20.0f) return true;
+                        if (const auto g = top.height(q); !g || *g > y + 5.0f) return false;
+                    }
+                    return false;
+                };
+                return (reach({1, 0}) && reach({-1, 0})) || (reach({0, 1}) && reach({0, -1}));
+            };
+            // Row runs of open cells in [r0, r1) -> one quad each; cells inside [s0, s1) are skipped (already done).
+            auto fillCells = [&](glm::vec2 r0, glm::vec2 r1, glm::vec2 s0, glm::vec2 s1) {
+                for (float z = r0.y; z < r1.y; z += kFillCell) {
+                    float run = std::numeric_limits<float>::quiet_NaN();
+                    for (float x = r0.x;; x += kFillCell) {
+                        const glm::vec2 p(x + 0.5f * kFillCell, z + 0.5f * kFillCell);
+                        const auto g = top.height(p), o = own.height(p);
+                        const bool done = p.x >= s0.x && p.x < s1.x && p.y >= s0.y && p.y < s1.y;
+                        const bool open = x < r1.x && !done && (wetAt(p, g) || (!o && (!g || *g > y)) || (rimFill && g && *g < y && channel(p)));
+                        if (open && std::isnan(run)) run = x;
+                        if (!open && !std::isnan(run)) quad({run, z}, {x, z + kFillCell}), run = std::numeric_limits<float>::quiet_NaN();
+                        if (x >= r1.x) break;
+                    }
+                }
+            };
+            const glm::vec2 r0 = glm::floor((pLo - 2.0f * kCharUnit) / kFillCell) * kFillCell, r1 = pHi + 2.0f * kCharUnit;
+            fillCells(r0, r1, {}, {});
+            // Out to the horizon only when water (the level's own or the fill) lines a good share of the edge of the
+            // level's ground (a sea around the level, L03A, CC3A); a sea also fills the open cells of the whole level
+            // area (CC3A: past its planes the sky dome's lower half showed). So do holes around plane-less layers (TB
+            // TRCA01 moat, VIQ01 / VIQ02 / VICA01 sea: the hole runs on past the layers' surf lines); after that fill
+            // the rim is open in every such level, so their horizon is decided by the sight lines over their water
+            // (openSea): out to it for a sea, not for a river or moat walled in by its banks (CC2A, TRCA01).
+            const float far = 200000.0f;
+            render::WaterSurfaces wet;
+            wet.build(water, {});
+            const float rim = rimShare(wet);
+            const bool sea = rim > 0.25f || openSea;
+            if (sea || holeFill) {
+                const glm::vec2 c0 = r0 + glm::floor((cLo - r0) / kFillCell) * kFillCell;  // on the same cell lattice
+                fillCells(c0, cHi, r0, glm::max(r1, r0 + glm::ceil((r1 - r0) / kFillCell) * kFillCell));
+            }
+            const size_t ringQuads = sea ? 4 : 0;
+            if (sea) {  // ring around the level's ground out to the horizon
+                quad({cLo.x - far, cLo.y - far}, {cHi.x + far, cLo.y});
+                quad({cLo.x - far, cHi.y}, {cHi.x + far, cHi.y + far});
+                quad({cLo.x - far, cLo.y}, {cLo.x, cHi.y});
+                quad({cHi.x, cLo.y}, {cHi.x + far, cHi.y});
+            }
+            if (!fill.indices.empty()) {
+                const int bin = int(std::lround(y / 10.0f));  // the fill: the water at its height's mean tint
+                fillTint = seaTint[bin] / seaArea[bin];
+            }
+            if (std::getenv("BBTIME_VK_MATERIALS")) {
+                // Flood check: ground below the fill under it where it is not water already, on a 37.5-unit grid (the
+                // horizon ring lies outside the level's ground box; left out, it would coarsen the grid).
+                render::WaterSurfaces filled;
+                filled.build(std::span(water).last(fill.indices.size()).first(fill.indices.size() - 6 * ringQuads), {});
+                constexpr float s = kFillCell / 4.0f;
+                float flooded = 0.0f;
+                for (float z = cLo.y + 0.5f * s; z < cHi.y; z += s)
+                    for (float x = cLo.x + 0.5f * s; x < cHi.x; x += s)
+                        if (const auto g = top.height({x, z}); g && *g < y - 20.0f && filled.height({x, z}) && !wetAt({x, z}, g))
+                            flooded += s * s;
+                std::println(stderr, "sea plane y {:.0f} {} rim {:.2f} quads {} | flooded ground {:.1f} char^2 | ground box {:.0f} {:.0f} .. {:.0f} {:.0f}", y,
+                             sea ? "sea (horizon)" : "local", rim, fill.indices.size() / 6, flooded / (kCharUnit * kCharUnit), cLo.x, cLo.y, cHi.x, cHi.y);
+            }
+        }
+        // TB water zones (Scene::waterZones, the exe's 0x1000 trigger zones): the game measures depth from their top, so
+        // a zone holding the level's own water layers (within 100 units of its top) is open water there even where
+        // the game draws only scattered additive patches over the bed (Granny pond): its top joins the fill, at the
+        // surface Bugs swims in, in 50-unit cells over its bed and holes (cell, below): never a hard-edged rectangle
+        // hanging out past a cliff (AZQ01's upper rivers). Zones over pits or without layers (kill / trigger volumes)
+        // are left alone.
+        render::WaterSurfaces zoneGround;
+        if (!scene.waterZones.empty()) zoneGround.build(ground, {});
+        for (const auto& z : scene.waterZones) {
+            const float zy = z[0][1];
+            auto inside = [&](glm::vec2 p) {  // convex quad, either winding
+                int pos = 0, neg = 0;
+                for (size_t k = 0; k < 4; ++k) {
+                    const glm::vec2 a(z[k][0], z[k][2]), b(z[(k + 1) % 4][0], z[(k + 1) % 4][2]);
+                    const float cr = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+                    pos += cr > 0.0f, neg += cr < 0.0f;
+                }
+                return !pos || !neg;
+            };
+            bool held = false;
+            for (size_t i = 0; i + 2 < layerTris && !held; i += 3) {
+                const glm::vec3 c = (water[i] + water[i + 1] + water[i + 2]) / 3.0f;
+                held = std::abs(c.y - zy) < 100.0f && inside({c.x, c.z});
+            }
+            if (!held) continue;
+            if (fill.indices.empty()) {  // no sea fill: the tint of the layers at the zone's height
+                glm::vec4 t(0.0f);
+                float a = 0.0f;
+                for (const auto& [bin, area] : seaArea)
+                    if (std::abs(10.0f * float(bin) - zy) < 100.0f) t += seaTint[bin], a += area;
+                fillTint = a > 0.0f ? t / a : glm::vec4(0.0f);
+            }
+            const glm::u8vec3 c(glm::round(seaColor / std::max(seaTotal, 1e-6f)));
+            constexpr float kZoneCell = 50.0f;
+            glm::vec2 zLo(std::numeric_limits<float>::max()), zHi(-std::numeric_limits<float>::max());
+            for (const auto& q : z) zLo = glm::min(zLo, glm::vec2(q[0], q[2])), zHi = glm::max(zHi, glm::vec2(q[0], q[2]));
+            // Over its bed (ground at most 3000 under the top: AZQ01's pond 2600 deep; ground over it hides the fill) or
+            // over a hole in it (TB draws pond / moat holes the backdrop shows through: AZQ01's lower pond): a void
+            // enclosed by such ground in all four directions within the zone, not the open air past a cliff's edge.
+            auto bedAt = [&](glm::vec2 p) { const auto g = zoneGround.height(p); return g && zy - *g < 3000.0f; };
+            auto cell = [&](glm::vec2 p) {
+                if (!inside(p)) return false;
+                if (zoneGround.height(p)) return bedAt(p);
+                for (const glm::vec2 d : {glm::vec2(1, 0), glm::vec2(-1, 0), glm::vec2(0, 1), glm::vec2(0, -1)}) {
+                    glm::vec2 q = p + d * 100.0f;
+                    while (inside(q) && !zoneGround.height(q)) q += d * 100.0f;
+                    if (!inside(q) || !bedAt(q)) return false;
+                }
+                return true;
+            };
+            size_t cells = 0;
+            for (float zz = zLo.y; zz < zHi.y; zz += kZoneCell) {
+                float run = std::numeric_limits<float>::quiet_NaN();
+                for (float x = zLo.x;; x += kZoneCell) {
+                    const bool open = x < zHi.x && cell({x + 0.5f * kZoneCell, zz + 0.5f * kZoneCell});
+                    if (open && std::isnan(run)) run = x;
+                    if (!open && !std::isnan(run)) {
+                        const uint32_t n = uint32_t(fill.vertices.size());
+                        for (const glm::vec2& q : {glm::vec2(run, zz), glm::vec2(x, zz), glm::vec2(x, zz + kZoneCell), glm::vec2(run, zz + kZoneCell)})
+                            fill.vertices.push_back({.pos = {q.x, zy, q.y}, .uv = {0, 0}, .rgba = {c.r, c.g, c.b, 255}});
+                        for (uint32_t k : {0u, 2u, 1u, 0u, 3u, 2u}) fill.indices.push_back(n + k);  // facing up
+                        for (uint32_t k : {0u, 1u, 2u, 0u, 2u, 3u}) water.push_back({fill.vertices[n + k].pos[0], zy, fill.vertices[n + k].pos[2]});
+                        run = std::numeric_limits<float>::quiet_NaN(), ++cells;
+                    }
+                    if (x >= zHi.x) break;
+                }
+            }
+            if (std::getenv("BBTIME_VK_MATERIALS"))
+                std::println(stderr, "water zone fill y {:.0f} ({:.0f} {:.0f} .. {:.0f} {:.0f}) {} runs", zy, z[0][0], z[0][2], z[2][0], z[2][2], cells);
+        }
+        if (!fill.indices.empty()) {
+            addMeshes({&fill, 1}, false, SIZE_MAX, verts, idx);
+            meshes_.back().water = true;
+            meshes_.back().tint = glm::packUnorm4x8(fillTint);
+            seaFill_ = meshes_.size() - 1;
+            sceneMeshCount_ = meshes_.size();
+        }
+        waterSurf_.build(water, ground);
+        waves_.reset();
+        if (!waterSurf_.empty()) waves_ = std::make_unique<render::WaveField>([this](glm::vec2 p) { return waterSurf_.wet(p); });
+        waterTracks_.clear();
+        under_ = 0.0f;
+    }
+    std::vector<TriRange> ranges;
+    for (const GpuMesh& m : meshes_)
+        if (m.blend != Blend::Additive && m.blend != Blend::Subtract) ranges.push_back({m.firstIndex, m.indexCount, m.baseVertex});
+    const std::vector<uint32_t> normals = smoothNormals(verts, idx, ranges);
+    const VkDeviceSize vBytes = verts.size() * sizeof(Vertex), iBytes = idx.size() * sizeof(uint32_t), nBytes = normals.size() * sizeof(uint32_t);
+    Buffer scratch, geo; // geo: geometry staging (sized after the Enhanced water's fill mesh was generated)
+    if (vBytes) {
+        const VkBufferUsageFlags rtUse = rt_ ? kRtInput : 0;
+        geo = makeBuffer(vBytes + iBytes + nBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+        sceneVbo_ = makeBuffer(vBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rtUse, false);
+        sceneIbo_ = makeBuffer(iBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rtUse, false);
+        sceneNrm_ = makeBuffer(nBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false);
+        std::memcpy(geo.map, verts.data(), vBytes);
+        std::memcpy(static_cast<uint8_t*>(geo.map) + vBytes, idx.data(), iBytes);
+        std::memcpy(static_cast<uint8_t*>(geo.map) + vBytes + iBytes, normals.data(), nBytes);
+        const VkBufferCopy cv{0, 0, vBytes}, ci{vBytes, 0, iBytes}, cn{vBytes + iBytes, 0, nBytes};
+        vkCmdCopyBuffer(cb, geo.buf, sceneVbo_.buf, 1, &cv);
+        vkCmdCopyBuffer(cb, geo.buf, sceneIbo_.buf, 1, &ci);
+        vkCmdCopyBuffer(cb, geo.buf, sceneNrm_.buf, 1, &cn);
+        memoryBarrier(cb, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | (rt_ ? VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT : 0),
+                      VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | (rt_ ? VK_ACCESS_2_SHADER_READ_BIT : 0));
+        if (rt_) { // static scene BLAS: one geometry per shadow-casting mesh, built once per level
+            std::vector<VkAccelerationStructureGeometryKHR> geoms;
+            std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
+            const VkDeviceAddress va = address(sceneVbo_.buf), ia = address(sceneIbo_.buf);
+            for (const GpuMesh& m : meshes_)
+                if (m.caster) blasGeometry(m, va, ia, uint32_t(verts.size() - 1), geoms, ranges, sceneGeos_);
+            if (!geoms.empty()) {
+                buildAccel(cb, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geoms, ranges, false, sceneBlas_, scratch);
+                memoryBarrier(cb, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                              VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+            }
+        }
+    }
+    endOneShot(cb);
+    destroy(staging);
+    destroy(geo);
+    destroy(scratch);
+}
+
+uint32_t Renderer::createImage(const Texture& t) {
+    if (!device_ || !t.width || !t.height || t.rgba.size() != size_t(t.width) * t.height * 4) return 0;
+    Buffer staging = makeBuffer(t.rgba.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    VkCommandBuffer cb = beginOneShot();
+    VkDeviceSize off = 0;
+    std::vector<uint32_t> slot;
+    const TexSrc src{t.width, t.height, t.rgba.data()};
+    VkDeviceMemory mem = createTextures(cb, staging, off, {&src, 1}, false, slot);
+    endOneShot(cb);
+    destroy(staging);
+    if (slot[0] == kNoSlot) {
+        vkFreeMemory(device_, mem, nullptr);
+        return 0;
+    }
+    slots_[slot[0]].mem = mem;
+    return slot[0];
+}
+
+void Renderer::destroyImage(uint32_t image) {
+    if (!image || image >= slots_.size() || !slots_[image].img) return;
+    waitIdle();
+    freeSlot(image);
+}
+
+// ---------------------------------------------------------------- frame
+
+void Renderer::beginFrame(const Settings& s) {
+    SDL_GetWindowSizeInPixels(window_, &w_, &h_);
+    drawCalls_ = 0;
+    batch_.clear();
+    recording_ = submitted_ = passOpen_ = genPending_ = fsrScene_ = sceneDrawn_ = false;
+    uiDraws_.clear();
+    if (w_ <= 0 || h_ <= 0) return;
+    // FSR (Enhanced, not the 4:3 3-D menus): upscaling, or frame generation alone (= FSR native AA, which produces the
+    // dilated depth / motion frame interpolation needs).
+    fsrMode_ = fsrOk_ && s.fidelity == Fidelity::Enhanced && !s.frame43 && (s.upscaling != Upscaling::Off || s.frameGeneration);
+    fgMode_ = fsrMode_ && s.frameGeneration;
+    if (presentStale_.exchange(false)) swapDirty_ = true;
+    if (!fgMode_) stopPresenter(); // the swapchain returns to this thread
+    if (swapDirty_ || w_ != swapW_ || h_ != swapH_ || vsync_ != swapVsync_) recreateSwapchain();
+    if (swapDirty_) return;
+    if (fsrMode_) updateFsr(s);
+    if (fgMode_) startPresenter();
+
+    Frame& f = frames_[frame_];
+    if (fgMode_) { // this slot's images are free once the present thread copied them out
+        std::unique_lock lock(jobMutex_);
+        jobCv_.wait(lock, [&] { return jobsDone_ >= slotJob_[frame_] || presenterError_; });
+        if (presenterError_) std::rethrow_exception(std::exchange(presenterError_, nullptr));
+    }
+    for (int k = 0; k < 2; ++k) // the present thread's copies out of this slot (also after frame generation ended)
+        if (f.copyPending[k]) {
+            check(vkWaitForFences(device_, 1, &f.copyFence[k], VK_TRUE, UINT64_MAX), "vkWaitForFences(copy)");
+            f.copyPending[k] = false;
+        }
+    check(vkWaitForFences(device_, 1, &f.fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+    for (Buffer& b : f.garbage) destroy(b);
+    f.garbage.clear();
+    f.used = 0;
+    if (fgMode_) { // frame generation: render into the slot's real-frame image, the present thread shows it
+        target_ = f.realUi.img;
+        targetView_ = f.realUi.view;
+    } else {
+        const VkResult r = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, f.acquired, VK_NULL_HANDLE, &imageIndex_);
+        if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+            swapDirty_ = true; // skip this frame, the next beginFrame recreates
+            return;
+        }
+        if (r == VK_SUBOPTIMAL_KHR) swapDirty_ = true;
+        else check(r, "vkAcquireNextImageKHR");
+        target_ = swapImages_[imageIndex_];
+        targetView_ = swapViews_[imageIndex_];
+    }
+    check(vkResetFences(device_, 1, &f.fence), "vkResetFences");
+    check(vkResetCommandBuffer(f.cmd, 0), "vkResetCommandBuffer");
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    check(vkBeginCommandBuffer(f.cmd, &bi), "vkBeginCommandBuffer");
+    w_ = int(extent_.width);
+    h_ = int(extent_.height);
+
+    msaaOn_ = !fsrMode_ && s.fidelity == Fidelity::Enhanced && s.msaa && msaaMax_ > VK_SAMPLE_COUNT_1_BIT; // FSR is the AA
+    const Image& depth = msaaOn_ ? msaaDepth_ : depth_;
+    constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    constexpr auto COLOR_W = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    constexpr auto DEPTH_STAGES = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    constexpr auto DEPTH_RW = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    imageBarrier(f.cmd, target_, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                 COLOR_OUT | VK_PIPELINE_STAGE_2_COPY_BIT, 0, COLOR_OUT, COLOR_W);
+    imageBarrier(f.cmd, depth.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                 DEPTH_STAGES, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, DEPTH_STAGES, DEPTH_RW);
+    if (msaaOn_)
+        imageBarrier(f.cmd, msaaColor_.img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, COLOR_OUT, COLOR_W, COLOR_OUT, COLOR_W);
+
+    beginPass(true);
+    recording_ = true;
+}
+
+// Opens the frame's dynamic-rendering pass on its target (swapchain image or Frame::realUi; resolved from the MSAA target when on). clear: the
+// frame's first pass; else a resume after drawScene's shadow / acceleration-structure work: colour is kept (the MSAA
+// target is always stored for that), depth is cleared (drawScene clears its viewport anyway). Enhanced water (drawScene):
+// storeDepth keeps the depth for the pass after its copy (MSAA: also resolved, sample 0, into the water depth copy),
+// loadDepth resumes on it.
+void Renderer::beginPass(bool clear, bool storeDepth, bool loadDepth) {
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    const Image& depth = msaaOn_ ? msaaDepth_ : depth_;
+    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = msaaOn_ ? msaaColor_.view : targetView_;
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    if (msaaOn_) {
+        color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+        color.resolveImageView = targetView_;
+        color.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+    VkRenderingAttachmentInfo depthAtt{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depthAtt.imageView = depth.view;
+    depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAtt.loadOp = loadDepth ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAtt.storeOp = storeDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    if (storeDepth && msaaOn_) {
+        depthAtt.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+        depthAtt.resolveImageView = slots_[waterDepthSlot_].view;
+        depthAtt.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    }
+    depthAtt.clearValue.depthStencil = {1.0f, 0};
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, extent_};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color;
+    ri.pDepthAttachment = &depthAtt;
+    vkCmdBeginRendering(cb, &ri);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set_, 0, nullptr);
+    passOpen_ = true;
+}
+
+Renderer::Image Renderer::makeImage(VkExtent2D ext, VkFormat fmt, VkImageUsageFlags usage) {
+    Image im;
+    im.img = newImage(ext.width, ext.height, fmt, VK_SAMPLE_COUNT_1_BIT, usage, 1);
+    VkMemoryRequirements r;
+    vkGetImageMemoryRequirements(device_, im.img, &r);
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = r.size;
+    ai.memoryTypeIndex = memoryType(r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    check(vkAllocateMemory(device_, &ai, nullptr, &im.mem), "vkAllocateMemory(FSR)");
+    check(vkBindImageMemory(device_, im.img, im.mem, 0), "vkBindImageMemory(FSR)");
+    im.view = newView(im.img, fmt, fmt == depthFormat_ ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    return im;
+}
+
+void Renderer::destroyFsrTargets() {
+    for (Image* i : {&fsrColor_, &fsrMotion_, &fsrReactive_, &fsrDepth_, &fsrDilatedDepth_, &fsrDilatedMotion_, &fsrPrevDepth_, &fsrOutput_, &genImage_})
+        destroy(*i);
+    for (Frame& f : frames_) destroy(f.genUi), destroy(f.realUi);
+    fsrRender_ = fsrDisplay_ = {};
+}
+
+namespace {
+// FSR image usages (Fsr::Image::usage must match the images' create info). TRANSFER_SRC: the Enhanced water's copies.
+constexpr VkImageUsageFlags kFsrInput = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+constexpr VkImageUsageFlags kFsrDepth = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+constexpr VkImageUsageFlags kFsrShared = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+constexpr VkImageUsageFlags kFsrDisplay = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+constexpr VkFormat kFsrDisplayFormat = VK_FORMAT_R8G8B8A8_UNORM;
+} // namespace
+
+// (Re)creates the FSR targets and contexts when the window size, quality mode or frame generation changed.
+void Renderer::updateFsr(const Settings& s) {
+    const Upscaling q = s.upscaling == Upscaling::Off ? Upscaling::NativeAa : s.upscaling;
+    if (fsr_->created() && fsrScale_ == q && fsrFg_ == fgMode_ && fsrDisplay_.width == extent_.width && fsrDisplay_.height == extent_.height)
+        return;
+    waitIdle();
+    fsr_->destroy();
+    destroyFsrTargets();
+    const float ratio = q == Upscaling::Quality ? 1.5f : q == Upscaling::Balanced ? 1.7f : q == Upscaling::Performance ? 2.0f : 1.0f;
+    fsrDisplay_ = extent_;
+    fsrRender_ = {std::max(1u, uint32_t(float(extent_.width) / ratio + 0.5f)), std::max(1u, uint32_t(float(extent_.height) / ratio + 0.5f))};
+    fsrColor_ = makeImage(fsrRender_, swapFormat_, kFsrInput);
+    fsrMotion_ = makeImage(fsrRender_, VK_FORMAT_R16G16_SFLOAT, kFsrInput);
+    fsrReactive_ = makeImage(fsrRender_, VK_FORMAT_R8_UNORM, kFsrInput);
+    fsrDepth_ = makeImage(fsrRender_, depthFormat_, kFsrDepth);
+    fsrDilatedDepth_ = makeImage(fsrRender_, VK_FORMAT_R32_SFLOAT, kFsrShared);
+    fsrDilatedMotion_ = makeImage(fsrRender_, VK_FORMAT_R16G16_SFLOAT, kFsrShared);
+    fsrPrevDepth_ = makeImage(fsrRender_, VK_FORMAT_R32_UINT, kFsrShared);
+    fsrOutput_ = makeImage(fsrDisplay_, kFsrDisplayFormat, kFsrDisplay);
+    if (fgMode_) {
+        genImage_ = makeImage(fsrDisplay_, kFsrDisplayFormat, kFsrDisplay);
+        for (Frame& f : frames_)
+            for (Image* i : {&f.genUi, &f.realUi})
+                *i = makeImage(fsrDisplay_, swapFormat_,
+                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    }
+    // The shared upscaler resources stay in GENERAL (FidelityFX UNORDERED_ACCESS) between dispatches.
+    VkCommandBuffer cb = beginOneShot();
+    for (const Image* i : {&fsrDilatedDepth_, &fsrDilatedMotion_, &fsrPrevDepth_})
+        imageBarrier(cb, i->img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    endOneShot(cb);
+    fsr_->create(fsrRender_, fsrDisplay_, fgMode_, kFsrDisplayFormat);
+    fsrScale_ = q;
+    fsrFg_ = fgMode_;
+    fsrReset_ = true;
+    diag_.clear(); // drawScene rewrites the overlay line
+}
+
+// End of an FSR scene: upscale into fsrOutput_, interpolate the in-between frame (frame generation), copy the
+// upscaled frame into the swapchain image and reopen the frame's pass there for the 2D layer.
+void Renderer::fsrResolve(const Settings& s) {
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT;
+    constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    constexpr auto CS = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    constexpr auto COPY = VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT;
+    constexpr auto READ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdEndRendering(cb);
+    for (const Image* i : {&fsrColor_, &fsrMotion_, &fsrReactive_})
+        imageBarrier(cb, i->img, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, READ, COLOR_OUT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, CS,
+                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    imageBarrier(cb, fsrDepth_.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, READ,
+                 VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, CS, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    // Previous frame's blit / interpolation read fsrOutput_ (and wrote genImage_): this frame overwrites them.
+    imageBarrier(cb, fsrOutput_.img, C, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, COPY | CS, 0, CS,
+                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    const uint64_t now = SDL_GetTicksNS();
+    Fsr::Upscale u;
+    auto img = [](const Image& i, VkFormat f, VkExtent2D e, VkImageUsageFlags use) { return Fsr::Image{i.img, f, e, use}; };
+    u.color = img(fsrColor_, swapFormat_, fsrRender_, kFsrInput);
+    u.motion = img(fsrMotion_, VK_FORMAT_R16G16_SFLOAT, fsrRender_, kFsrInput);
+    u.reactive = img(fsrReactive_, VK_FORMAT_R8_UNORM, fsrRender_, kFsrInput);
+    u.depth = img(fsrDepth_, depthFormat_, fsrRender_, kFsrDepth);
+    u.dilatedDepth = img(fsrDilatedDepth_, VK_FORMAT_R32_SFLOAT, fsrRender_, kFsrShared);
+    u.dilatedMotion = img(fsrDilatedMotion_, VK_FORMAT_R16G16_SFLOAT, fsrRender_, kFsrShared);
+    u.prevDepth = img(fsrPrevDepth_, VK_FORMAT_R32_UINT, fsrRender_, kFsrShared);
+    u.output = img(fsrOutput_, kFsrDisplayFormat, fsrDisplay_, kFsrDisplay);
+    u.jitterX = fsrJitter_[0];
+    u.jitterY = fsrJitter_[1];
+    u.frameMs = fsrLastNs_ && !fsrReset_ ? std::clamp(float(double(now - fsrLastNs_) * 1e-6), 0.1f, 1000.0f) : 16.7f;
+    u.zNear = s.zNear;
+    u.zFar = s.zFar;
+    u.vfovRad = s.vfovRad();
+    u.reset = fsrReset_;
+    u.sharpness = s.upscaling == Upscaling::Off || s.upscaling == Upscaling::NativeAa ? 0.0f : 0.3f; // RCAS against the upscale blur
+    fsr_->upscale(cb, u);
+    fsrLastNs_ = now;
+    fsrReset_ = false;
+    imageBarrier(cb, fsrOutput_.img, C, 0, 1, VK_IMAGE_LAYOUT_GENERAL, READ, CS, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, CS | COPY,
+                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    if (fgMode_ && fsr_->generation()) {
+        imageBarrier(cb, genImage_.img, C, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, COPY | CS, 0, CS,
+                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        const bool valid = fsr_->interpolate(cb, img(fsrOutput_, kFsrDisplayFormat, fsrDisplay_, kFsrDisplay),
+                                             img(genImage_, kFsrDisplayFormat, fsrDisplay_, kFsrDisplay), u);
+        if (valid) { // the generated frame, with this frame's 2D layer added at submit (Frame::genUi)
+            imageBarrier(cb, genImage_.img, C, 0, 1, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, CS,
+                         VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, COPY, VK_ACCESS_2_TRANSFER_READ_BIT);
+            const Image& genUi = frames_[frame_].genUi;
+            imageBarrier(cb, genUi.img, C, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, COPY | COLOR_OUT, 0, COPY,
+                         VK_ACCESS_2_TRANSFER_WRITE_BIT);
+            const VkImageBlit blit{{C, 0, 0, 1}, {{0, 0, 0}, {int32_t(fsrDisplay_.width), int32_t(fsrDisplay_.height), 1}},
+                                   {C, 0, 0, 1}, {{0, 0, 0}, {int32_t(fsrDisplay_.width), int32_t(fsrDisplay_.height), 1}}};
+            vkCmdBlitImage(cb, genImage_.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, genUi.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                           VK_FILTER_NEAREST);
+            imageBarrier(cb, genUi.img, C, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, COPY,
+                         VK_ACCESS_2_TRANSFER_WRITE_BIT, COLOR_OUT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+            genPending_ = true;
+        }
+    }
+    // Upscaled frame -> swapchain image (format conversion by the blit), then the frame's pass resumes on it.
+    VkImage swap = target_;
+    imageBarrier(cb, fsrOutput_.img, C, 0, 1, READ, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, CS, 0, COPY, VK_ACCESS_2_TRANSFER_READ_BIT);
+    imageBarrier(cb, swap, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, COLOR_OUT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, COPY, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    const VkImageBlit blit{{C, 0, 0, 1}, {{0, 0, 0}, {int32_t(fsrDisplay_.width), int32_t(fsrDisplay_.height), 1}},
+                           {C, 0, 0, 1}, {{0, 0, 0}, {int32_t(extent_.width), int32_t(extent_.height), 1}}};
+    vkCmdBlitImage(cb, fsrOutput_.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swap, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
+    imageBarrier(cb, swap, C, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, COPY,
+                 VK_ACCESS_2_TRANSFER_WRITE_BIT, COLOR_OUT, VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    beginPass(false);
+}
+
+// ---------------------------------------------------------------- Enhanced water
+
+void Renderer::setWaterBodies(std::span<const render::WaterBody> bodies, float dt) {
+    waterBodies_.assign(bodies.begin(), bodies.end());
+    waterDt_ += dt;
+    waterTime_ += dt;
+}
+
+// The copies of the opaque scene the water refracts (render-target size ext): colour (swapchain format) and depth;
+// the backdrop the Enhanced fog fades into.
+// Recreated (after the GPU idles) only when the size changes.
+void Renderer::waterTargets(VkExtent2D ext) {
+    if (waterColorSlot_ != kNoWater && waterExtent_.width == ext.width && waterExtent_.height == ext.height) return;
+    waitIdle();
+    for (uint32_t* s : {&waterColorSlot_, &waterDepthSlot_, &backdropSlot_})
+        if (*s != kNoWater) freeSlot(std::exchange(*s, kNoWater));
+    Image c = makeImage(ext, swapFormat_, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    Image b = makeImage(ext, swapFormat_, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    Image d = makeImage(ext, depthFormat_, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    VkCommandBuffer cb = beginOneShot();
+    for (const auto& [img, aspect] : {std::pair{c.img, VK_IMAGE_ASPECT_COLOR_BIT}, std::pair{d.img, VK_IMAGE_ASPECT_DEPTH_BIT},
+                                      std::pair{b.img, VK_IMAGE_ASPECT_COLOR_BIT}})
+        imageBarrier(cb, img, aspect, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    endOneShot(cb);
+    waterColorSlot_ = allocSlot(c.view);
+    waterDepthSlot_ = allocSlot(d.view);
+    backdropSlot_ = allocSlot(b.view);
+    if (waterColorSlot_ == kNoWater || waterDepthSlot_ == kNoWater || backdropSlot_ == kNoWater)
+        throw std::runtime_error("bindless table full (water / backdrop copies)");
+    slots_[waterColorSlot_] = c;
+    slots_[waterDepthSlot_] = d;
+    slots_[backdropSlot_] = b;
+    waterExtent_ = ext;
+}
+
+// Copies the opaque scene (colour target `color`, single-sample depth `depth` unless the pass already resolved it into
+// the water depth copy) for the water; the frame's pass is closed. Leaves both attachments ready to be loaded again.
+void Renderer::waterCopy(VkImage color, VkImage depth, bool depthResolved) {
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT, D = VK_IMAGE_ASPECT_DEPTH_BIT;
+    constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, COPY = VK_PIPELINE_STAGE_2_COPY_BIT,
+                   FRAG = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    constexpr auto DEPTH = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    constexpr auto SRC = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, DST = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, READ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    const VkImage wd = slots_[waterDepthSlot_].img;
+    const VkExtent3D ext{waterExtent_.width, waterExtent_.height, 1};
+    copyColor(color, slots_[waterColorSlot_].img);
+    VkImageCopy rc{{C, 0, 0, 1}, {}, {C, 0, 0, 1}, {}, ext};
+    if (depthResolved) { // multisample resolves synchronise as colour attachment writes
+        imageBarrier(cb, wd, D, 0, 1, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, READ, COLOR_OUT | DEPTH,
+                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, FRAG, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    } else {
+        imageBarrier(cb, depth, D, 0, 1, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, SRC, DEPTH, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, COPY,
+                     VK_ACCESS_2_TRANSFER_READ_BIT);
+        imageBarrier(cb, wd, D, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, DST, FRAG, 0, COPY, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        rc.srcSubresource.aspectMask = rc.dstSubresource.aspectMask = D;
+        vkCmdCopyImage(cb, depth, SRC, wd, DST, 1, &rc);
+        imageBarrier(cb, wd, D, 0, 1, DST, READ, COPY, VK_ACCESS_2_TRANSFER_WRITE_BIT, FRAG, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        imageBarrier(cb, depth, D, 0, 1, SRC, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, COPY, 0, DEPTH,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    }
+    // The attachments the next pass loads (MSAA colour / depth, FSR motion / reactive) were written by this pass.
+    memoryBarrier(cb, COLOR_OUT | DEPTH, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, COLOR_OUT | DEPTH,
+                  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+}
+
+// Copies the colour target `color` (render-target size) into the sampled image dst; color stays an attachment.
+void Renderer::copyColor(VkImage color, VkImage dst) {
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT;
+    constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, COPY = VK_PIPELINE_STAGE_2_COPY_BIT,
+                   FRAG = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    constexpr auto SRC = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, DST = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, READ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageBarrier(cb, color, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, SRC, COLOR_OUT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, COPY,
+                 VK_ACCESS_2_TRANSFER_READ_BIT);
+    imageBarrier(cb, dst, C, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, DST, FRAG, 0, COPY, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    const VkImageCopy rc{{C, 0, 0, 1}, {}, {C, 0, 0, 1}, {}, {waterExtent_.width, waterExtent_.height, 1}};
+    vkCmdCopyImage(cb, color, SRC, dst, DST, 1, &rc);
+    imageBarrier(cb, dst, C, 0, 1, DST, READ, COPY, VK_ACCESS_2_TRANSFER_WRITE_BIT, FRAG, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    imageBarrier(cb, color, C, 0, 1, SRC, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, COPY, 0, COLOR_OUT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+}
+
+// One frame of the wave field: it follows the view (a quarter window ahead of the camera), the bodies of
+// setWaterBodies wade / bob / splash, the field steps the time since the last frame and its heights are uploaded
+// (outside a render pass). field = scene.frag's L.waves; false (zero) when the water is at rest.
+bool Renderer::waterWaves(const Camera& cam, glm::vec4& field) {
+    field = glm::vec4(0.0f);
+    if (!waves_) return false;
+    using render::WaveField;
+    const float dt = std::exchange(waterDt_, 0.0f);
+    const glm::vec2 ahead(-std::sin(cam.yaw), -std::cos(cam.yaw)); // camera yaw 0 looks down -z
+    waves_->follow(glm::vec2(cam.pos.x, cam.pos.z) + ahead * (0.25f * float(WaveField::kN) * WaveField::kCell));
+    for (WaterTrack& t : waterTracks_) t.seen = false;
+    for (const render::WaterBody& b : waterBodies_) {
+        auto it = std::ranges::find(waterTracks_, b.id, &WaterTrack::id);
+        const bool known = it != waterTracks_.end();
+        if (!known) it = waterTracks_.insert(waterTracks_.end(), {b.id, b.feet, waterTime_, true});
+        WaterTrack& t = *it;
+        const glm::vec3 prev = std::exchange(t.feet, b.feet);
+        t.seen = true;
+        const glm::vec2 xz(b.feet.x, b.feet.z);
+        const std::optional<float> h = b.surface ? b.surface : waterSurf_.height(xz);
+        if (!h || !known || dt <= 0.0f) continue;
+        // Falling through the surface (faster than 300 units/s: not standing on something floating at the waterline): a
+        // splash by the fall speed.
+        if (prev.y > *h && b.feet.y <= *h && prev.y - b.feet.y > 300.0f * dt) {
+            const glm::vec3 at = glm::mix(prev, b.feet, (prev.y - *h) / (prev.y - b.feet.y));
+            waves_->ripple({at.x, at.z}, std::clamp((prev.y - b.feet.y) / dt / 1500.0f, 0.4f, 1.0f));
+            t.bob = waterTime_;
+        }
+        // Wading (feet in the water, the body not under it): a wall + a wake while moving, a faint bob every 1.2..1.5 s
+        // standing (phased by id, so a crowd does not pulse together).
+        if (b.feet.y <= *h + 8.0f && b.feet.y > *h - b.height) {
+            const glm::vec2 move = xz - glm::vec2(prev.x, prev.z);
+            waves_->wade(xz, b.radius, move, dt);
+            if (glm::length(move) > 112.0f * dt) t.bob = waterTime_;
+            else if (waterTime_ - t.bob >= 1.2f + 0.3f * glm::fract(float(b.id) * 0.618f)) waves_->ripple(xz, 0.15f), t.bob = waterTime_;
+        }
+    }
+    std::erase_if(waterTracks_, [](const WaterTrack& t) { return !t.seen; });
+    waves_->step(dt);
+    const std::span<const float> h = waves_->heights();
+    if (h.empty()) return false;
+    waveHalf_.resize(h.size());
+    for (size_t i = 0; i < h.size(); ++i) waveHalf_[i] = uint16_t(glm::packHalf1x16(h[i]));
+    const auto [buf, off] = streamWrite(waveHalf_.data(), waveHalf_.size() * sizeof(uint16_t));
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    const VkImage img = slots_[waveSlot_].img;
+    constexpr auto FRAG = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, COPY = VK_PIPELINE_STAGE_2_COPY_BIT;
+    imageBarrier(cb, img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FRAG, 0, COPY,
+                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy copy{};
+    copy.bufferOffset = off;
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy.imageExtent = {uint32_t(WaveField::kN), uint32_t(WaveField::kN), 1};
+    vkCmdCopyBufferToImage(cb, buf, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    imageBarrier(cb, img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, COPY,
+                 VK_ACCESS_2_TRANSFER_WRITE_BIT, FRAG, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    const glm::vec2 o = waves_->origin();
+    field = glm::vec4(o.x, o.y, 1.0f / (WaveField::kCell * float(WaveField::kN)), WaveField::kCell);
+    return true;
+}
+
+void Renderer::drawScene(const Camera& cam, const Settings& s) {
+    if (meshes_.empty() || !recording_) return;
+    flush2D();
+    sceneDrawn_ = true;
+    Frame& f = frames_[frame_];
+    VkCommandBuffer cb = f.cmd;
+    const bool original = s.fidelity == Fidelity::Original;
+    if (sunPending_) { // camera yaw 0 looks down -z: "behind" = (sin yaw, 0, cos yaw)
+        const float yaw = cam.yaw + kSunSide;
+        toSun_ = glm::vec3(std::sin(yaw) * std::cos(kSunElevation), std::sin(kSunElevation), std::cos(yaw) * std::cos(kSunElevation));
+        sunPending_ = false;
+    }
+    const bool enhanced = s.fidelity == Fidelity::Enhanced && !s.frame43;
+    Shadows mode = dynamicShadows(s) ? s.shadows : Shadows::Off;
+    if (mode >= Shadows::Rt && !rt_) mode = Shadows::Map; // graceful fallback: no ray queries on this device
+    const bool refl = enhanced && s.reflections && rt_;    // ray-traced reflections need ray queries (else off)
+    const bool rtPath = rt_ && (mode >= Shadows::Rt || refl);
+    const bool lit = mode != Shadows::Off || refl;
+    const bool fsr = fsrMode_ && fsr_->created();          // beginFrame: Enhanced, !frame43, FSR wanted and usable
+    // Enhanced water: drawn over a copy of the opaque scene (a swapchain without TRANSFER_SRC cannot be copied: off).
+    const bool waterWanted = enhanced && s.water != render::Water::Original && !waterSurf_.empty() && (fsr || swapReadable_);
+    const bool cartoon = s.water == render::Water::Cartoon;
+    if (mode != drawnMode_ || refl != reflectionsOn_ || fsr != fsrScene_ || waterWanted != waterOn_ || cartoon != waterCartoon_ || diag_.empty()) {
+        static constexpr const char* kNames[] = {"off", "shadow map (4 cascades)", "ray-query", "ray-query + RT AO"};
+        drawnMode_ = mode;
+        reflectionsOn_ = refl;
+        waterOn_ = waterWanted;
+        waterCartoon_ = cartoon;
+        diag_ = std::format("{} | {} | shadows {}  reflections {}  water {}", rtProbe_, fsrProbe_, kNames[int(mode)], refl ? "RT" : "off",
+                            !waterWanted ? "original" : cartoon ? "cartoon" : "stylised");
+        if (fsr)
+            diag_ += std::format("\nFSR {}x{} -> {}x{}  frame generation {}", fsrRender_.width, fsrRender_.height, fsrDisplay_.width,
+                                 fsrDisplay_.height, fgMode_ ? "on (2 presents per frame)" : "off");
+    }
+    fsrScene_ = fsr;
+    // FSR renders the full window at the render resolution (frame43 / pillarbox never apply: Enhanced, !frame43).
+    const render::Viewport vp = fsr ? render::Viewport{0, 0, int(fsrRender_.width), int(fsrRender_.height)}
+                                : (original && s.pillarbox) || s.frame43 ? render::fitAspect(w_, h_, 4.0f / 3.0f)
+                                                                         : render::Viewport{0, 0, w_, h_};
+    const int top = (fsr ? vp.h : h_) - vp.y - vp.h; // fitAspect is bottom-left based like GL; Vulkan is top-left
+    const VkRect2D rect{{vp.x, top}, {uint32_t(vp.w), uint32_t(vp.h)}};
+
+    glm::mat4 clipFix(1.0f); // GL clip z [-w, w] -> Vulkan [0, w]
+    clipFix[2][2] = 0.5f;
+    clipFix[3][2] = 0.5f;
+    const glm::mat4 view = cam.view();
+    const glm::mat4 proj = render::projection(s.vfovRad(), float(vp.w) / float(vp.h), s.zNear, s.zFar);
+    Push3D pc{};
+    const glm::mat4 viewProj = clipFix * proj * view;
+    const bool zoned = render::walkZones(zones_, proj * view, zoneView_, zoneTable_, zoneDrawn_);
+    auto shown = [&](const GpuMesh& m) { return !zoned || m.zone < 0 || zoneDrawn_[size_t(m.zone)]; };
+    bool water = false; // this frame draws stylised water: the opaque scene is copied for it
+    for (size_t i = 0; waterOn_ && i < sceneMeshCount_ && !water; ++i) water = meshes_[i].water && shown(meshes_[i]);
+    // Enhanced fog fades into the backdrop (BBLIT-Remaster: per pixel to the sky behind, not a flat colour): the
+    // background layer (TB domes, LiT's type-9 sky in Enhanced) is copied before the world draws over it.
+    const bool anyBack = std::ranges::any_of(meshes_, [&](const GpuMesh& m) { return m.background && shown(m); });
+    const bool backdrop = enhanced && s.fog && s.fogEnd > s.fogStart && anyBack && (fsr || swapReadable_);
+    if (water || backdrop) waterTargets(fsr ? fsrRender_ : extent_);
+    const bool lightSet = lit || fsr || water; // set 1 (LightUbo) bound, smooth normals streamed
+    // Underwater (Enhanced water): the eye under the water surface over it (5 units of margin: the camera skims it; TB
+    // cameras follow Bugs down in a dive, Granny pond), eased in / out over ~0.3 s of water time. The look: fog into
+    // the water's colour by distance (every pipeline), texture wobble and caustics below the surface (lit ones,
+    // LightUbo::under); apps/bbtime muffles the audio by underwater().
+    const std::optional<float> surfaceY = waterOn_ ? waterSurf_.height({cam.pos.x, cam.pos.z}) : std::nullopt;
+    {
+        const float target = surfaceY && cam.pos.y < *surfaceY - 5.0f ? 1.0f : 0.0f;
+        under_ += (target - under_) * (1.0f - std::exp(-10.0f * std::clamp(waterTime_ - underTime_, 0.0f, 0.25f)));
+        if (std::abs(target - under_) < 1e-3f) under_ = target;
+        underTime_ = waterTime_;
+    }
+    const bool under = under_ > 0.0f;
+    // Fog under water: from the eye out to 3500 (~12 Bugs) at full depth, from the scene's range (or none) above. Its
+    // colour: the water's (the fill's GpuMesh::tint, hue kept at a deep-water brightness), else stylised teal.
+    glm::vec2 underFog(0.0f);
+    glm::vec3 underColor(0.05f, 0.22f, 0.26f);
+    if (under) {
+        const glm::vec2 above = s.fog && s.fogEnd > s.fogStart ? glm::vec2(s.fogStart, s.fogEnd) : glm::vec2(s.zFar, s.zFar * 1.01f);
+        underFog = glm::mix(above, glm::vec2(0.0f, 3500.0f), under_);
+        if (seaFill_ < meshes_.size()) {
+            const glm::vec3 t = glm::unpackUnorm4x8(meshes_[seaFill_].tint);
+            if (const float m = std::max({t.r, t.g, t.b}); m > 1e-3f) underColor = glm::mix(underColor, t / m * 0.3f, 0.5f);
+        }
+    }
+    float jitter[2] = {0.0f, 0.0f};
+    glm::mat4 jit(1.0f);
+    if (fsr) { // sub-pixel jitter of FSR's sequence, as a clip-space translation (NDC y up = pixel y down)
+        Fsr::jitter(fsrFrame_++, fsrRender_, fsrDisplay_, jitter[0], jitter[1]);
+        fsrJitter_[0] = jitter[0];
+        fsrJitter_[1] = jitter[1];
+        jit = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f * jitter[0] / float(vp.w), -2.0f * jitter[1] / float(vp.h), 0.0f));
+    }
+    pc.viewProj = clipFix * jit * proj * view;
+    // The background layer's far plane: a TB dome with Mesh::farClip (0x465710 flag 0x2000000) clips at 64000, any
+    // other at the world's zFar.
+    const glm::mat4 viewProjMain = pc.viewProj;
+    const glm::mat4 viewProjBack = clipFix * jit * render::projection(s.vfovRad(), float(vp.w) / float(vp.h), s.zNear, std::max(s.zFar, 64000.0f)) * view;
+    pc.viewZ = glm::vec4(view[0][2], view[1][2], view[2][2], view[3][2]);
+    pc.fogColorScale = glm::vec4(s.fogColor[0], s.fogColor[1], s.fogColor[2], s.colorScale(colorScale_));
+    // scene.frag bit 13: the fog colour is the backdrop copy (bindless slot in r); bit 14 ground haze: g its top, b the
+    // horizon's screen v (camera pitch; no roll), the background's band below it in fog (0..5 degrees).
+    const bool haze = backdrop && s.haze > 0.0f;
+    const float tanHalf = std::tan(s.vfovRad() * 0.5f);
+    const float horizonV = 0.5f + 0.5f * std::tan(cam.pitch) / tanHalf, hazeBand = std::tan(5.0f * std::numbers::pi_v<float> / 180.0f) * 0.5f / tanHalf;
+    if (backdrop) pc.fogColorScale = glm::vec4(float(backdropSlot_), s.hazeTop, horizonV, pc.fogColorScale.a);
+    pc.texGamma = s.texGamma(texGamma_);
+    pc.fog = s.fog ? glm::vec2(s.fogStart, s.fogEnd) : glm::vec2(0.0f);
+    if (under) pc.fogColorScale = glm::vec4(glm::mix(glm::vec3(s.fogColor[0], s.fogColor[1], s.fogColor[2]), underColor, under_), pc.fogColorScale.a);
+    pc.samp = original ? (linearOriginal_ ? kSampLinear : kSampNearest) : kSampTrilinear;
+    // Scene geometry lives in device-local buffers; actor geometry is streamed into this frame's ring.
+    VkBuffer geomV[2] = {sceneVbo_.buf, VK_NULL_HANDLE}, geomI[2] = {sceneIbo_.buf, VK_NULL_HANDLE};
+    VkDeviceSize offV[2] = {0, 0}, offI[2] = {0, 0};
+    // Lit / motion-vector pipelines: binding 1 smooth normals, binding 2 previous positions (scene: static = itself).
+    VkBuffer geomN[2] = {sceneNrm_.buf, VK_NULL_HANDLE}, geomP[2] = {sceneVbo_.buf, VK_NULL_HANDLE};
+    VkDeviceSize offN[2] = {0, 0}, offP[2] = {0, 0};
+    if (!actorIdx_.empty()) {
+        std::tie(geomV[1], offV[1]) = streamWrite(actorVerts_.data(), actorVerts_.size() * sizeof(Vertex));
+        std::tie(geomI[1], offI[1]) = streamWrite(actorIdx_.data(), actorIdx_.size() * sizeof(uint32_t));
+        if (lightSet) {
+            if (actorNrm_.empty()) {
+                std::vector<TriRange> ranges;
+                for (size_t i = sceneMeshCount_; i < meshes_.size(); ++i)
+                    if (meshes_[i].blend != Blend::Additive && meshes_[i].blend != Blend::Subtract)
+                        ranges.push_back({meshes_[i].firstIndex, meshes_[i].indexCount, meshes_[i].baseVertex});
+                actorNrm_ = smoothNormals(actorVerts_, actorIdx_, ranges);
+            }
+            std::tie(geomN[1], offN[1]) = streamWrite(actorNrm_.data(), actorNrm_.size() * sizeof(uint32_t));
+        }
+        if (fsr) { // same posed models as last frame: their previous vertices, else no actor motion
+            const std::vector<Vertex>& prev = prevActorLayout_ == actorLayout_ ? prevActorVerts_ : actorVerts_;
+            std::tie(geomP[1], offP[1]) = streamWrite(prev.data(), prev.size() * sizeof(Vertex));
+        }
+    }
+    const uint32_t bindings = fsr ? 3 : lightSet ? 2 : 1;
+    int boundGeom = -1;
+    auto bindGeom = [&](const GpuMesh& m) {
+        if (int g = m.actor; g != boundGeom) {
+            const VkBuffer bufs[3] = {geomV[g], geomN[g], geomP[g]};
+            const VkDeviceSize offs[3] = {offV[g], offN[g], offP[g]};
+            vkCmdBindVertexBuffers(cb, 0, bindings, bufs, offs);
+            vkCmdBindIndexBuffer(cb, geomI[g], offI[g], VK_INDEX_TYPE_UINT32);
+            boundGeom = g;
+        }
+    };
+
+    // Shadow map, acceleration structures, FSR's offscreen targets and the water's wave heights: recorded outside the
+    // frame's render pass.
+    const bool outside = mode == Shadows::Map || rtPath || fsr || water;
+    if (outside) {
+        vkCmdEndRendering(cb);
+        passOpen_ = false;
+    }
+    if (lightSet) {
+        LightUbo L{};
+        L.curViewProj = viewProj;
+        L.prevViewProj = prevValid_ && !fsrReset_ ? prevViewProj_ : viewProj;
+        prevViewProj_ = viewProj;
+        prevValid_ = true;
+        L.reflect = refl;
+        L.temporal = fsr; // per-pixel random AO / rough-reflection rays only where FSR's history averages them
+        const bool haveCasters = casterLo_.x <= casterHi_.x;
+        const glm::vec3 sceneMid = haveCasters ? (casterLo_ + casterHi_) * 0.5f : cam.pos;
+        const float sceneRadius = (haveCasters ? glm::length(casterHi_ - casterLo_) * 0.5f : 0.0f) + 4.0f * kCharUnit;
+        L.sun = glm::vec4(toSun_, kShadowBrightness);
+        L.eye = glm::vec4(cam.pos, 1.0f);
+        L.rt = glm::vec4(kRayOffset, 2.0f * sceneRadius + glm::length(cam.pos - sceneMid), kAoRadius, kAoStrength);
+        L.mode = uint32_t(mode);
+        L.rayMin = kRayMin;
+        const float far = std::max(s.fog && s.fogEnd > s.fogStart ? std::min(s.fogEnd, s.zFar) : s.zFar, s.zNear * 2.0f);
+        for (uint32_t c = 0; c < kCascades; ++c) L.splits[int(c)] = std::min(kCascadeEnd[c], far);
+        if (water) {
+            L.invViewProj = glm::inverse(pc.viewProj);
+            waterWaves(cam, L.waves);
+            // w: 1 = cartoon, + 2 = a background layer (TB sky dome) is drawn: the water reflects / fades into it
+            const bool bgLayer = std::ranges::any_of(meshes_, [&](const GpuMesh& m) { return m.background && shown(m); });
+            L.water = glm::vec4(waterTime_, 1.0f / float(waterExtent_.width), 1.0f / float(waterExtent_.height), (cartoon ? 1.0f : 0.0f) + (bgLayer ? 2.0f : 0.0f));
+            L.waterSlots = glm::uvec4(waterColorSlot_, waterDepthSlot_, waveSlot_, waterNormalSlot_);
+        }
+        if (under) L.under = glm::vec4(under_, surfaceY.value_or(cam.pos.y), waterTime_, 0.0f);  // easing out: no surface over the eye
+
+        if (mode == Shadows::Map) {
+            // Cascades: bounding sphere of each view-frustum slice (rotation-invariant radius), light-space centre snapped
+            // to whole texels so shadows do not shimmer while the camera moves; depth spans every caster toward the sun.
+            const glm::mat4 lightView = glm::lookAt(glm::vec3(0.0f), -toSun_, glm::vec3(0.0f, 1.0f, 0.0f));
+            const glm::mat4 inv = glm::inverse(view);
+            const float tanH = 1.0f / proj[0][0], tanV = 1.0f / proj[1][1];
+            float casterTop = -std::numeric_limits<float>::max();
+            for (int k = 0; haveCasters && k < 8; ++k) {
+                const glm::vec3 corner((k & 1) ? casterHi_.x : casterLo_.x, (k & 2) ? casterHi_.y : casterLo_.y, (k & 4) ? casterHi_.z : casterLo_.z);
+                casterTop = std::max(casterTop, (lightView * glm::vec4(corner, 1.0f)).z);
+            }
+            imageBarrier(cb, shadowMap_.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, kCascades);
+            Push3D sp{};
+            sp.samp = kSampTrilinear;
+            for (uint32_t c = 0; c < kCascades; ++c) {
+                const float d0 = c ? L.splits[int(c) - 1] : s.zNear, d1 = std::max(L.splits[int(c)], d0 + 1.0f);
+                glm::vec3 corners[8], centre(0.0f);
+                for (int k = 0; k < 8; ++k) {
+                    const float d = (k & 4) ? d1 : d0;
+                    corners[k] = glm::vec3(inv * glm::vec4(((k & 1) ? 1.0f : -1.0f) * tanH * d, ((k & 2) ? 1.0f : -1.0f) * tanV * d, -d, 1.0f));
+                    centre += corners[k] * 0.125f;
+                }
+                float r = 0.0f;
+                for (const glm::vec3& p : corners) r = std::max(r, glm::length(p - centre));
+                r = std::ceil(r / 16.0f) * 16.0f;
+                const float texel = 2.0f * r / float(kShadowSize);
+                glm::vec3 lc = glm::vec3(lightView * glm::vec4(centre, 1.0f));
+                lc.x = std::floor(lc.x / texel) * texel;
+                lc.y = std::floor(lc.y / texel) * texel;
+                const float zTop = std::max(casterTop, lc.z + r) + kCharUnit, zBottom = lc.z - r - kCharUnit;
+                L.cascade[c] = clipFix * glm::ortho(lc.x - r, lc.x + r, lc.y - r, lc.y + r, -zTop, -zBottom) * lightView;
+                L.texel[int(c)] = texel;
+
+                VkRenderingAttachmentInfo d{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+                d.imageView = shadowLayers_[c];
+                d.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                d.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                d.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                d.clearValue.depthStencil = {1.0f, 0};
+                VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+                ri.renderArea = {{0, 0}, {kShadowSize, kShadowSize}};
+                ri.layerCount = 1;
+                ri.pDepthAttachment = &d;
+                vkCmdBeginRendering(cb, &ri);
+                vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeShadow_);
+                const VkViewport svp{0.0f, 0.0f, float(kShadowSize), float(kShadowSize), 0.0f, 1.0f};
+                vkCmdSetViewport(cb, 0, 1, &svp);
+                vkCmdSetScissor(cb, 0, 1, &ri.renderArea);
+                vkCmdSetCullMode(cb, VK_CULL_MODE_NONE);
+                sp.viewProj = L.cascade[c];
+                vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof sp, &sp);
+                for (const GpuMesh& m : meshes_) {
+                    if (!m.caster) continue;
+                    bindGeom(m);
+                    sp.alphaRef = m.blend == Blend::AlphaTest ? 0.5f : -1.0f;
+                    sp.tex = m.texture;
+                    vkCmdPushConstants(cb, layout_, kPushStages, offsetof(Push3D, alphaRef), 16, &sp.alphaRef);
+                    vkCmdDrawIndexed(cb, m.indexCount, 1, m.firstIndex, m.baseVertex, 0);
+                }
+                vkCmdEndRendering(cb);
+            }
+            imageBarrier(cb, shadowMap_.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, kCascades);
+        }
+        if (rtPath) {
+            // Ray tracing: actor BLAS (posed this frame) + TLAS {scene BLAS, actor BLAS}, rebuilt every frame.
+            // Last use of this frame slot's structures / scratch: the fragment shaders and builds two frames ago.
+            memoryBarrier(cb, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+            std::vector<VkAccelerationStructureGeometryKHR> geoms;
+            std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
+            actorGeos_.clear();
+            if (!actorIdx_.empty()) {
+                const VkDeviceAddress va = address(geomV[1]) + offV[1], ia = address(geomI[1]) + offI[1];
+                for (size_t i = sceneMeshCount_; i < meshes_.size(); ++i)
+                    if (meshes_[i].caster) blasGeometry(meshes_[i], va, ia, uint32_t(actorVerts_.size() - 1), geoms, ranges, actorGeos_);
+            }
+            if (!geoms.empty()) {
+                buildAccel(cb, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geoms, ranges, true, f.actorBlas, f.scratch);
+                memoryBarrier(cb, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                              VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                              VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+            }
+            VkAccelerationStructureInstanceKHR inst[2]{};
+            uint32_t n = 0;
+            auto instance = [&](VkAccelerationStructureKHR as, uint32_t firstGeo) {
+                VkAccelerationStructureDeviceAddressInfoKHR ai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+                ai.accelerationStructure = as;
+                VkAccelerationStructureInstanceKHR& x = inst[n++];
+                x.transform.matrix[0][0] = x.transform.matrix[1][1] = x.transform.matrix[2][2] = 1.0f;
+                x.instanceCustomIndex = firstGeo; // scene.frag: Geo index = custom index + geometry index
+                x.mask = 0xFF;
+                x.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+                x.accelerationStructureReference = vkASAddress_(device_, &ai);
+            };
+            if (sceneBlas_.as) instance(sceneBlas_.as, 0);
+            if (!geoms.empty()) instance(f.actorBlas.as, uint32_t(sceneGeos_.size()));
+            growBuffer(f.instances, sizeof inst,
+                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
+            std::memcpy(f.instances.map, inst, sizeof inst);
+            VkAccelerationStructureGeometryKHR tg{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+            tg.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+            tg.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+            tg.geometry.instances.data.deviceAddress = address(f.instances.buf);
+            const VkAccelerationStructureBuildRangeInfoKHR tr{n, 0, 0, 0};
+            buildAccel(cb, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, {&tg, 1}, {&tr, 1}, true, f.tlas, f.scratch);
+            memoryBarrier(cb, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+
+            const size_t geoBytes = (sceneGeos_.size() + actorGeos_.size()) * sizeof(RtGeo);
+            growBuffer(f.geos, std::max<size_t>(geoBytes, sizeof(RtGeo)), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+            if (!sceneGeos_.empty()) std::memcpy(f.geos.map, sceneGeos_.data(), sceneGeos_.size() * sizeof(RtGeo));
+            if (!actorGeos_.empty())
+                std::memcpy(static_cast<RtGeo*>(f.geos.map) + sceneGeos_.size(), actorGeos_.data(), actorGeos_.size() * sizeof(RtGeo));
+            VkWriteDescriptorSetAccelerationStructureKHR wa{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+            wa.accelerationStructureCount = 1;
+            wa.pAccelerationStructures = &f.tlas.as;
+            const VkDescriptorBufferInfo gi{f.geos.buf, 0, VK_WHOLE_SIZE};
+            VkWriteDescriptorSet w[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, &wa}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+            w[0].dstSet = w[1].dstSet = f.lightSet;
+            w[0].descriptorCount = w[1].descriptorCount = 1;
+            w[0].dstBinding = 2;
+            w[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+            w[1].dstBinding = 3;
+            w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            w[1].pBufferInfo = &gi;
+            vkUpdateDescriptorSets(device_, 2, w, 0, nullptr);
+        }
+        std::memcpy(f.light.map, &L, sizeof L);
+    }
+    const VkClearColorValue fogClear{{s.fogColor[0], s.fogColor[1], s.fogColor[2], 1.0f}};
+    // FSR: the scene at render resolution into colour + motion + depth (cleared by the pass; load: resumed after the
+    // water's copy of the opaque scene).
+    auto beginFsr = [&](bool load) {
+        VkRenderingAttachmentInfo col[3]{{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO}, {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO},
+                                         {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO}};
+        col[0].imageView = fsrColor_.view;
+        col[1].imageView = fsrMotion_.view;
+        col[2].imageView = fsrReactive_.view;
+        for (VkRenderingAttachmentInfo& a : col) {
+            a.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            a.loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+            a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        }
+        col[0].clearValue.color = fogClear;
+        VkRenderingAttachmentInfo dep{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        dep.imageView = fsrDepth_.view;
+        dep.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        dep.loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+        dep.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        dep.clearValue.depthStencil = {1.0f, 0};
+        VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+        ri.renderArea = {{0, 0}, fsrRender_};
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 3;
+        ri.pColorAttachments = col;
+        ri.pDepthAttachment = &dep;
+        vkCmdBeginRendering(cb, &ri);
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set_, 0, nullptr);
+    };
+    if (fsr) {
+        constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        constexpr auto DEPTH = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        // Previous frame's readers: FSR's compute passes.
+        for (const Image* i : {&fsrColor_, &fsrMotion_, &fsrReactive_})
+            imageBarrier(cb, i->img, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0, COLOR_OUT,
+                         VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        imageBarrier(cb, fsrDepth_.img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0, DEPTH,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        beginFsr(false);
+    } else if (outside) {
+        // Resume the frame's pass: colour (incl. the MSAA resolve) and depth of the first pass come before its loads.
+        memoryBarrier(cb, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                      VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        if (water && msaaOn_) // the pass resolves its depth into the water's copy (synchronised as a colour attachment write)
+            imageBarrier(cb, slots_[waterDepthSlot_].img, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        beginPass(false, water);
+    }
+    if (lightSet) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 1, 1, &f.lightSet, 0, nullptr);
+    boundGeom = -1;
+
+    if (!fsr) {
+        VkClearAttachment clears[2]{};
+        clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        clears[0].clearValue.color = fogClear;
+        clears[1].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        clears[1].clearValue.depthStencil = {1.0f, 0};
+        const VkClearRect clearRect{rect, 0, 1};
+        vkCmdClearAttachments(cb, 2, clears, 1, &clearRect);
+    }
+    // Negative height flips y so the GL-convention projection (camera.h) and CCW front faces carry over.
+    const VkViewport viewport{float(vp.x), float(top + vp.h), float(vp.w), -float(vp.h), 0.0f, 1.0f};
+    vkCmdSetViewport(cb, 0, 1, &viewport);
+    vkCmdSetScissor(cb, 0, 1, &rect);
+    vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof pc, &pc);
+
+    VkPipeline bound = VK_NULL_HANDLE;
+    const GpuMesh* fill = seaFill_ < meshes_.size() ? &meshes_[seaFill_] : nullptr; // open-water plane (Enhanced water only)
+    // tri / tris: a run of the mesh's triangles (bugs.exe sorted pass); ref: alpha-test reference of a blended mesh;
+    // zw: depth writes of a blended mesh (pc_order.h).
+    auto draw = [&](const GpuMesh& m, bool stylised = true, uint32_t tri = 0, uint32_t tris = UINT32_MAX, float ref = -1.0f, bool zw = false) {
+        uint32_t tex = m.texture;
+        if (m.textureAnim >= 0) {
+            const TexAnim& a = texAnims_[size_t(m.textureAnim)];
+            const int32_t lt = size_t(m.textureAnim) < linkTex_.size() ? linkTex_[size_t(m.textureAnim)] : -1;
+            tex = lt < 0 ? a.frames[(a.start + texTick_ / a.hold) % a.frames.size()] : size_t(lt) < texSlot_.size() ? texSlot_[size_t(lt)] : kSlotWhite;
+        }
+        // Original Fidelity draws ABR 2 the way the PC exe's GL path does (luma alpha, SRC_ALPHA / 1-SRC_ALPHA), and
+        // LiT's textured ABR 0/1/3 as bugs.exe's per-mode texel alpha (0x420d10), also alpha-blended.
+        const bool pcSub = original && m.blend == Blend::Subtract;
+        const bool pcSemi = original && linearOriginal_ && (m.blend == Blend::Alpha || m.blend == Blend::Additive) &&
+                            (m.texture != kSlotWhite || m.textureAnim >= 0);
+        // Stylised water (bit 7): opaque and depth-writing over the opaque-scene copy, always a lit variant (vWorld).
+        const bool w = stylised && water && m.water;
+        const int b = w ? 0 : m.blend == Blend::Alpha || pcSub || pcSemi ? 1 : m.blend == Blend::Additive ? 2 : m.blend == Blend::Subtract ? 3 : 0;
+        const int kind = w ? (rtPath ? 2 : 1) : !lit ? 0 : rtPath ? 2 : 1;
+        const VkPipeline p = fsr ? pipeLit_[kind][1][0][b] : kind == 0 ? pipe3D_[msaaOn_][b] : pipeLit_[kind][0][msaaOn_][b];
+        if (p != bound) vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, bound = p);
+        bindGeom(m);
+        if (m.background) {
+            const glm::mat4& vpm = m.farClip > 0.0f ? viewProjBack : viewProjMain;
+            if (pc.viewProj != vpm) pc.viewProj = vpm, vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof pc.viewProj, &pc.viewProj);
+        }
+        vkCmdSetCullMode(cb, m.twoSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+        vkCmdSetDepthWriteEnable(cb, b == 0 || zw);
+        pc.alphaRef = m.blend == Blend::AlphaTest ? 0.5f : ref;
+        pc.flags = pcSemi ? 64u | 16u : uint32_t(m.blend == Blend::Additive || m.blend == Blend::Subtract) | (pcSub ? 2u : 0u);
+        if (mode != Shadows::Off && m.receiver) pc.flags |= 4u | (m.blend != Blend::Alpha ? 8u : 0u);
+        pc.material = refl ? m.material : 0u;
+        if (m.blend == Blend::Alpha) pc.flags |= 16u;
+        if (m.reactive) pc.flags |= 32u;
+        if (w) pc.flags = 128u, pc.material = m.tint, pc.alphaRef = -1.0f;  // stylised water: material = the original's colour
+        if (original && linearOriginal_) pc.flags |= 256u;  // scene.vert: bugs.exe's screen-linear eye depth
+        if (original && m.background) pc.flags |= 512u;     // scene.vert: bblit2.exe's CPU projection (sky domes)
+        pc.tex = tex;
+        if (!w && !original && m.blend != Blend::Opaque && m.blend != Blend::AlphaTest && m.unitUv) pc.flags |= 4096u;
+        if (backdrop && !m.background && !under) pc.flags |= 8192u;
+        if (haze && !under) pc.flags |= 16384u | (m.background ? 32768u : 0u) | uint32_t(std::lround(s.haze * 100.0f)) << 16;
+        // Fog: none on the background layer (TB has no fog; the dome sits beyond any fog range), Mesh::fogEnd in
+        // Original Fidelity (LiT per-object D), else the scene's.
+        pc.fog = under                                   ? underFog
+                 : haze && m.background                   ? glm::vec2(horizonV, hazeBand)
+                 : !s.fog || m.background                 ? glm::vec2(0.0f)
+                 : original && m.fogEnd > 0.0f ? glm::vec2(0.75f * m.fogEnd, m.fogEnd)
+                                               : glm::vec2(s.fogStart, s.fogEnd);
+        vkCmdPushConstants(cb, layout_, kPushStages, offsetof(Push3D, fog), sizeof(Push3D) - offsetof(Push3D, fog), &pc.fog);
+        vkCmdDrawIndexed(cb, std::min(m.indexCount - 3 * tri, 3 * tris), 1, m.firstIndex + 3 * tri, m.baseVertex, 0);
+        ++drawCalls_;
+    };
+    // Translucent meshes per polygon back to front by mean eye z, the order bugs.exe draws its blended polygons in
+    // (0x413440, pc_order.h), without depth writes; LiT Original Fidelity: bugs.exe's whole blended pass, untextured
+    // faces first, then layer 1 sorted per triangle, then layer 2 (Mesh::late), all depth-writing, alpha test GREATER 0
+    // except the sorted part.
+    const bool pcOrder = original && linearOriginal_;
+    auto blendedPass = [&](const std::vector<const GpuMesh*>& list) {
+        constexpr float kGreater0 = 0.5f / 255.0f;
+        auto apart = [&](const GpuMesh& m) { return pcOrder && ((m.texture == kSlotWhite && m.textureAnim < 0) || m.late); };
+        for (const GpuMesh* m : list)
+            if (pcOrder && m->texture == kSlotWhite && m->textureAnim < 0 && !m->late) draw(*m, false, 0, UINT32_MAX, kGreater0, true);
+        std::vector<render::PcTri> tris;
+        const glm::vec4 zRow(view[0][2], view[1][2], view[2][2], view[3][2]);  // eye-space z of a world point
+        for (uint32_t i = 0; i < list.size(); ++i) {
+            if (apart(*list[i])) continue;
+            for (uint32_t t = 0; t < list[i]->tris.size(); ++t) tris.push_back({glm::dot(zRow, glm::vec4(list[i]->tris[t], 1.0f)), i, t});
+        }
+        render::drawPcSorted(tris, [&](uint32_t i, uint32_t t, uint32_t n) { draw(*list[i], false, t, n, -1.0f, pcOrder); });
+        for (const GpuMesh* m : list)
+            if (pcOrder && m->late) draw(*m, false, 0, UINT32_MAX, kGreater0, true);
+    };
+    // TB OT layer 0 (Mesh::background, 0x422eb0): the sky domes first, then the depth clear, so the world and the
+    // Enhanced sea draw over them at any distance.
+    if (anyBack) {
+        for (Blend pass : {Blend::Opaque, Blend::AlphaTest})
+            for (const GpuMesh& m : meshes_)
+                if (m.blend == pass && m.background && shown(m)) draw(m, false);
+        std::vector<const GpuMesh*> back;
+        for (const GpuMesh& m : meshes_)
+            if (m.background && m.blend != Blend::Opaque && m.blend != Blend::AlphaTest && shown(m)) back.push_back(&m);
+        blendedPass(back);
+        if (backdrop) {  // the backdrop alone, for the fog (the pass resumes as the water's does)
+            vkCmdEndRendering(cb);
+            passOpen_ = false;
+            copyColor(fsr ? fsrColor_.img : target_, slots_[backdropSlot_].img);
+            if (fsr) beginFsr(true);
+            else beginPass(false, water, true);
+        }
+        VkClearAttachment clear{VK_IMAGE_ASPECT_DEPTH_BIT};
+        clear.clearValue.depthStencil = {1.0f, 0};
+        const VkClearRect clearRect{rect, 0, 1};
+        vkCmdClearAttachments(cb, 1, &clear, 1, &clearRect);
+        pc.viewProj = viewProjMain;
+        vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof pc, &pc);
+    }
+    // Same passes as the GL renderer: opaque, alpha-tested (depth-writing, unsorted), then the translucent ones.
+    for (Blend pass : {Blend::Opaque, Blend::AlphaTest})
+        for (const GpuMesh& m : meshes_)
+            if (m.blend == pass && !m.background && shown(m) && !(water && m.water)) draw(m);
+    auto blendedHere = [&](const GpuMesh& m) { return !m.background && shown(m) && !(water && (m.water || m.sheen) && !m.surf) && &m != fill; };
+    if (water) { // copy the opaque scene, then the water over it before the translucent rest
+        vkCmdEndRendering(cb);
+        passOpen_ = false;
+        if (fsr) waterCopy(fsrColor_.img, fsrDepth_.img, false);
+        else waterCopy(target_, msaaOn_ ? VK_NULL_HANDLE : depth_.img, msaaOn_);
+        if (fsr) beginFsr(true);
+        else beginPass(false, false, true);
+        if (fill && shown(*fill)) draw(*fill);  // first: the level's own water overwrites it where they coincide
+        for (const GpuMesh& m : meshes_)
+            if (m.water && &m != fill && shown(m)) draw(m);
+    }
+    std::vector<const GpuMesh*> translucent;
+    for (const GpuMesh& m : meshes_)
+        if (m.blend != Blend::Opaque && m.blend != Blend::AlphaTest && blendedHere(m))
+            translucent.push_back(&m);
+    blendedPass(translucent);
+    if (fsr) fsrResolve(s);
+}
+
+// Copies into this frame's host-visible ring; returns the buffer and offset to bind.
+std::pair<VkBuffer, VkDeviceSize> Renderer::streamWrite(const void* data, VkDeviceSize size) {
+    Frame& f = frames_[frame_];
+    if (f.used + size > f.stream.size) { // grow; the old buffer may still be referenced by this frame's commands
+        f.garbage.push_back(f.stream);
+        f.stream = makeBuffer(std::max(f.stream.size * 2, size), kStreamUsage | (rt_ ? kRtInput : 0), true);
+        f.used = 0;
+    }
+    const VkDeviceSize offset = f.used;
+    std::memcpy(static_cast<uint8_t*>(f.stream.map) + offset, data, size);
+    f.used = (f.used + size + 15) & ~VkDeviceSize(15);
+    return {f.stream.buf, offset};
+}
+
+void Renderer::quad2D(uint32_t tex, uint32_t sampler, float x, float y, float w, float h,
+                      float u0, float v0, float u1, float v1, const uint8_t rgba[4]) {
+    static constexpr uint8_t kWhite[4] = {255, 255, 255, 255};
+    if (!rgba) rgba = kWhite;
+    const uint32_t ts = tex << 2 | sampler;
+    auto v = [&](float px, float py, float u, float vv) { return V2{px, py, u, vv, {rgba[0], rgba[1], rgba[2], rgba[3]}, ts}; };
+    batch_.insert(batch_.end(), {v(x, y, u0, v0), v(x + w, y, u1, v0), v(x + w, y + h, u1, v1),
+                                 v(x, y, u0, v0), v(x + w, y + h, u1, v1), v(x, y + h, u0, v1)});
+}
+
+void Renderer::drawImage(uint32_t image, float x, float y, float w, float h, bool smooth, const uint8_t rgba[4]) {
+    if (image) quad2D(image, smooth ? kSampUiLinear : kSampUiNearest, x, y, w, h, 0, 0, 1, 1, rgba);
+}
+
+void Renderer::drawRect(float x, float y, float w, float h, const uint8_t rgba[4]) {
+    quad2D(kSlotWhite, kSampUiNearest, x, y, w, h, 0, 0, 1, 1, rgba);
+}
+
+void Renderer::multiplyRect(float x, float y, float w, float h, const uint8_t rgb[4]) {
+    flush2D();
+    drawRect(x, y, w, h, rgb);
+    flush2D(true);
+}
+
+void Renderer::drawText(float x, float y, int scale, std::string_view text, const uint8_t rgba[4]) {
+    const float g = float(kGlyph * scale);
+    float cx = x;
+    for (char ch : text) {
+        if (ch == '\n') {
+            cx = x;
+            y += g + float(scale) * 2.0f;
+            continue;
+        }
+        int c = static_cast<unsigned char>(ch);
+        if (c < 32 || c > 127) c = '?';
+        if (c != ' ') {
+            const float u = float((c - 32) % 16) / 16.0f, v = float((c - 32) / 16) / 6.0f;
+            quad2D(kSlotFont, kSampUiNearest, cx, y, g, g, u, v, u + 1.0f / 16.0f, v + 1.0f / 6.0f, rgba);
+        }
+        cx += g;
+    }
+}
+
+// One draw for the whole 2D batch: the texture/sampler travel per vertex (bindless), so draw order is kept.
+void Renderer::flush2D(bool multiply) {
+    if (batch_.empty() || !recording_) {
+        batch_.clear();
+        return;
+    }
+    VkCommandBuffer cb = frames_[frame_].cmd;
+    const auto [buf, off] = streamWrite(batch_.data(), batch_.size() * sizeof(V2));
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, (multiply ? pipe2DMul_ : pipe2D_)[msaaOn_]);
+    vkCmdSetCullMode(cb, VK_CULL_MODE_NONE);
+    const VkViewport viewport{0.0f, 0.0f, float(w_), float(h_), 0.0f, 1.0f};
+    const VkRect2D scissor{{0, 0}, extent_};
+    vkCmdSetViewport(cb, 0, 1, &viewport);
+    vkCmdSetScissor(cb, 0, 1, &scissor);
+    const float screen[2] = {float(std::max(w_, 1)), float(std::max(h_, 1))};
+    vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof screen, screen);
+    vkCmdBindVertexBuffers(cb, 0, 1, &buf, &off);
+    vkCmdDraw(cb, uint32_t(batch_.size()), 1, 0, 0);
+    ++drawCalls_;
+    if (genPending_) uiDraws_.push_back({buf, off, uint32_t(batch_.size()), multiply});
+    batch_.clear();
+}
+
+void Renderer::submitFrame(Buffer* readback, Buffer* genReadback) {
+    Frame& f = frames_[frame_];
+    flush2D();
+    if (passOpen_) vkCmdEndRendering(f.cmd);
+    passOpen_ = false;
+    if (!fsrScene_) fsrReset_ = true; // FSR history and frame interpolation restart after any frame without them
+    VkImage img = target_;
+    // The swapchain image is presented from here; frame generation's real-frame image is copied by the present thread.
+    const VkImageLayout last = fgMode_ ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT;
+    constexpr auto COLOR_OUT = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    auto copyOut = [&](VkImage from, Buffer* to) {
+        VkBufferImageCopy copy{};
+        copy.imageSubresource = {C, 0, 0, 1};
+        copy.imageExtent = {extent_.width, extent_.height, 1};
+        vkCmdCopyImageToBuffer(f.cmd, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to->buf, 1, &copy);
+    };
+    if (genPending_) { // this frame's 2D layer onto the generated frame too (the scene is interpolated, the HUD never)
+        VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        color.imageView = f.genUi.view;
+        color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        VkRenderingAttachmentInfo depthAtt{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+        depthAtt.imageView = depth_.view;
+        depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAtt.clearValue.depthStencil = {1.0f, 0};
+        memoryBarrier(f.cmd, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+        ri.renderArea = {{0, 0}, extent_};
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments = &color;
+        ri.pDepthAttachment = &depthAtt;
+        vkCmdBeginRendering(f.cmd, &ri);
+        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set_, 0, nullptr);
+        VkPipeline bound = pipe2D_[0];
+        vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bound);
+        vkCmdSetCullMode(f.cmd, VK_CULL_MODE_NONE);
+        const VkViewport viewport{0.0f, 0.0f, float(w_), float(h_), 0.0f, 1.0f};
+        const VkRect2D scissor{{0, 0}, extent_};
+        vkCmdSetViewport(f.cmd, 0, 1, &viewport);
+        vkCmdSetScissor(f.cmd, 0, 1, &scissor);
+        const float screen[2] = {float(std::max(w_, 1)), float(std::max(h_, 1))};
+        vkCmdPushConstants(f.cmd, layout_, kPushStages, 0, sizeof screen, screen);
+        for (const UiDraw& d : uiDraws_) {
+            if (VkPipeline p = (d.multiply ? pipe2DMul_ : pipe2D_)[0]; p != bound)
+                vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bound = p);
+            vkCmdBindVertexBuffers(f.cmd, 0, 1, &d.buf, &d.off);
+            vkCmdDraw(f.cmd, d.count, 1, 0, 0);
+        }
+        vkCmdEndRendering(f.cmd);
+        imageBarrier(f.cmd, f.genUi.img, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, COLOR_OUT,
+                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        if (genReadback) copyOut(f.genUi.img, genReadback);
+    }
+    if (readback) {
+        imageBarrier(f.cmd, img, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, COLOR_OUT,
+                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        copyOut(img, readback);
+        if (!fgMode_)
+            imageBarrier(f.cmd, img, C, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                         VK_PIPELINE_STAGE_2_COPY_BIT, 0, VK_PIPELINE_STAGE_2_NONE, 0);
+    } else {
+        imageBarrier(f.cmd, img, C, 0, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, last, COLOR_OUT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                     fgMode_ ? VK_PIPELINE_STAGE_2_COPY_BIT : VK_PIPELINE_STAGE_2_NONE, fgMode_ ? VK_ACCESS_2_TRANSFER_READ_BIT : 0);
+    }
+    if (readback || genReadback)
+        memoryBarrier(f.cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                      VK_ACCESS_2_HOST_READ_BIT);
+    check(vkEndCommandBuffer(f.cmd), "vkEndCommandBuffer");
+    VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    wait.semaphore = f.acquired;
+    wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT;
+    VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    signal.semaphore = fgMode_ ? VK_NULL_HANDLE : presentReady_[imageIndex_];
+    signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cbi.commandBuffer = f.cmd;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.waitSemaphoreInfoCount = fgMode_ ? 0 : 1; // frame generation: no swapchain image in this submission
+    si.pWaitSemaphoreInfos = &wait;
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    si.signalSemaphoreInfoCount = fgMode_ ? 0 : 1;
+    si.pSignalSemaphoreInfos = &signal;
+    {
+        std::lock_guard lock(queueMutex_);
+        check(vkQueueSubmit2(queue_, 1, &si, f.fence), "vkQueueSubmit2");
+    }
+    recording_ = false;
+    submitted_ = true;
+}
+
+namespace {
+bool writeShot(const std::filesystem::path& path, const uint8_t* src, uint32_t w, uint32_t h, bool bgra) {
+    std::vector<uint8_t> rgb(size_t(w) * h * 3);
+    for (size_t i = 0; i < size_t(w) * h; ++i) {
+        rgb[i * 3 + 0] = src[i * 4 + (bgra ? 2 : 0)];
+        rgb[i * 3 + 1] = src[i * 4 + 1];
+        rgb[i * 3 + 2] = src[i * 4 + (bgra ? 0 : 2)];
+    }
+    if (path.extension() == ".png") {
+        SDL_Surface* s = SDL_CreateSurfaceFrom(int(w), int(h), SDL_PIXELFORMAT_RGB24, rgb.data(), int(w * 3));
+        const bool ok = s && SDL_SavePNG(s, path.string().c_str());
+        if (!ok) std::println(stderr, "screenshot: {}", SDL_GetError());
+        SDL_DestroySurface(s);
+        return ok;
+    }
+    std::ofstream out(path, std::ios::binary);
+    out << "P6\n" << w << ' ' << h << "\n255\n";
+    out.write(reinterpret_cast<const char*>(rgb.data()), std::streamsize(rgb.size()));
+    return bool(out);
+}
+} // namespace
+
+bool Renderer::screenshot(const std::filesystem::path& path) {
+    if (!recording_ || !swapReadable_) return false;
+    const uint32_t w = extent_.width, h = extent_.height;
+    Buffer rb = makeBuffer(VkDeviceSize(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true), gb;
+    const char* env = std::getenv("BBTIME_VK_SHOT_GENERATED");
+    const bool gen = genPending_ && env && *env && *env != '0';
+    if (gen) gb = makeBuffer(VkDeviceSize(w) * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+    submitFrame(&rb, gen ? &gb : nullptr);
+    check(vkWaitForFences(device_, 1, &frames_[frame_].fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+    const bool bgra = swapFormat_ == VK_FORMAT_B8G8R8A8_UNORM;
+    bool ok = writeShot(path, static_cast<const uint8_t*>(rb.map), w, h, bgra);
+    if (gen) {
+        fs::path g = path;
+        g.replace_filename(path.stem().string() + "-generated" + path.extension().string());
+        ok = writeShot(g, static_cast<const uint8_t*>(gb.map), w, h, bgra) && ok;
+        destroy(gb);
+    }
+    destroy(rb);
+    return ok;
+}
+
+void Renderer::present() {
+    if (recording_) submitFrame(nullptr);
+    if (!submitted_) return;
+    submitted_ = false;
+    genShown_ = false;
+    if (fgMode_) { // frame generation: the present thread shows this slot's generated (if any) and real images
+        genShown_ = genPending_;
+        {
+            std::lock_guard lock(jobMutex_);
+            jobs_.push_back({frame_, genPending_, SDL_GetTicksNS()});
+            slotJob_[frame_] = ++jobsQueued_;
+        }
+        jobCv_.notify_all();
+        frame_ = (frame_ + 1) % kFrames;
+        return;
+    }
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &presentReady_[imageIndex_];
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &swapchain_;
+    pi.pImageIndices = &imageIndex_;
+    VkResult r;
+    {
+        std::lock_guard lock(queueMutex_);
+        r = vkQueuePresentKHR(queue_, &pi);
+    }
+    if (sceneDrawn_) presentTimes_.push_back(SDL_GetTicksNS());
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swapDirty_ = true;
+    else check(r, "vkQueuePresentKHR");
+    frame_ = (frame_ + 1) % kFrames;
+}
+
+// ---------------------------------------------------------------- frame-generation present thread
+
+void Renderer::startPresenter() {
+    if (presenter_.joinable()) return;
+    presenterStop_ = false;
+    frameIntervalMs_ = 0.0;
+    lastJobNs_ = 0;
+    presenter_ = std::thread([this] {
+        for (;;) {
+            PresentJob j;
+            {
+                std::unique_lock lock(jobMutex_);
+                jobCv_.wait(lock, [&] { return presenterStop_ || !jobs_.empty(); });
+                if (jobs_.empty()) return; // stop requested and nothing left
+                j = jobs_.front();
+            }
+            std::exception_ptr err;
+            try {
+                presentJob(j);
+            } catch (...) {
+                err = std::current_exception();
+            }
+            {
+                std::lock_guard lock(jobMutex_);
+                jobs_.pop_front();
+                ++jobsDone_;
+                if (err && !presenterError_) presenterError_ = err;
+            }
+            jobCv_.notify_all();
+        }
+    });
+}
+
+void Renderer::drainPresents() {
+    std::unique_lock lock(jobMutex_);
+    jobCv_.wait(lock, [&] { return jobsDone_ == jobsQueued_; });
+    if (presenterError_) std::rethrow_exception(std::exchange(presenterError_, nullptr));
+}
+
+void Renderer::stopPresenter() {
+    if (!presenter_.joinable()) return;
+    {
+        std::lock_guard lock(jobMutex_);
+        presenterStop_ = true;
+    }
+    jobCv_.notify_all();
+    presenter_.join();
+    if (presenterError_) std::rethrow_exception(std::exchange(presenterError_, nullptr));
+}
+
+void Renderer::waitIdle() {
+    drainPresents();
+    std::lock_guard lock(queueMutex_);
+    check(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle");
+}
+
+// Present thread: copies src (k 0 = generated, 1 = real frame) into a freshly acquired swapchain image and presents
+// it. The frame's rendering was submitted to the same queue before the job was queued, so a barrier orders it.
+bool Renderer::showImage(Frame& f, int k, const Image& src) {
+    uint32_t img = 0;
+    const VkResult a = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, f.copyAcquired[k], VK_NULL_HANDLE, &img);
+    if (a == VK_ERROR_OUT_OF_DATE_KHR) {
+        presentStale_ = true;
+        return false;
+    }
+    if (a == VK_SUBOPTIMAL_KHR) presentStale_ = true;
+    else check(a, "vkAcquireNextImageKHR(present thread)");
+    VkCommandBuffer cb = f.copyCmd[k];
+    check(vkResetFences(device_, 1, &f.copyFence[k]), "vkResetFences(present thread)");
+    check(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer");
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    check(vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer");
+    constexpr auto C = VK_IMAGE_ASPECT_COLOR_BIT;
+    memoryBarrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
+                  VK_ACCESS_2_TRANSFER_READ_BIT);
+    imageBarrier(cb, swapImages_[img], C, 0, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                 0, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    VkImageCopy copy{};
+    copy.srcSubresource = copy.dstSubresource = {C, 0, 0, 1};
+    copy.extent = {extent_.width, extent_.height, 1};
+    vkCmdCopyImage(cb, src.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapImages_[img], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    imageBarrier(cb, swapImages_[img], C, 0, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                 VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_NONE, 0);
+    check(vkEndCommandBuffer(cb), "vkEndCommandBuffer");
+    VkSemaphoreSubmitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    wait.semaphore = f.copyAcquired[k];
+    wait.stageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    signal.semaphore = presentReady_[img];
+    signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cbi.commandBuffer = cb;
+    VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    si.waitSemaphoreInfoCount = 1;
+    si.pWaitSemaphoreInfos = &wait;
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    si.signalSemaphoreInfoCount = 1;
+    si.pSignalSemaphoreInfos = &signal;
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &presentReady_[img];
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &swapchain_;
+    pi.pImageIndices = &img;
+    VkResult r;
+    {
+        std::lock_guard lock(queueMutex_);
+        check(vkQueueSubmit2(queue_, 1, &si, f.copyFence[k]), "vkQueueSubmit2(present thread)");
+        r = vkQueuePresentKHR(queue_, &pi);
+    }
+    presentTimes_.push_back(SDL_GetTicksNS());
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) presentStale_ = true;
+    else check(r, "vkQueuePresentKHR(present thread)");
+    return true;
+}
+
+// One rendered frame: its generated image now, its real image half a rendered-frame interval later (the interval
+// smoothed over the job arrival times), so shown frames are evenly spaced with or without vsync. A backlog (the next
+// frame already waiting) skips the wait.
+void Renderer::presentJob(const PresentJob& j) {
+    using Clock = std::chrono::steady_clock;
+    if (lastJobNs_) {
+        const double ms = double(j.ns - lastJobNs_) * 1e-6;
+        frameIntervalMs_ = frameIntervalMs_ > 0.0 && ms < 4.0 * frameIntervalMs_ ? frameIntervalMs_ + (ms - frameIntervalMs_) * 0.1 : ms;
+    }
+    lastJobNs_ = j.ns;
+    Frame& f = frames_[j.slot];
+    bool used[2] = {false, false};
+    if (j.gen) {
+        used[0] = showImage(f, 0, f.genUi);
+        bool backlog;
+        {
+            std::lock_guard lock(jobMutex_);
+            backlog = jobs_.size() > 1;
+        }
+        if (used[0] && !backlog && frameIntervalMs_ > 0.0)
+            std::this_thread::sleep_until(Clock::now() + std::chrono::duration<double, std::milli>(std::min(frameIntervalMs_, 100.0) * 0.5));
+    }
+    used[1] = showImage(f, 1, f.realUi);
+    f.copyPending[0] = used[0]; // beginFrame waits these fences before the slot's images are drawn again
+    f.copyPending[1] = used[1];
+}
+
+} // namespace bb::render_vk

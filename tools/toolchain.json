@@ -1,0 +1,10 @@
+{
+  "versions": {
+    "clang": "23.1.4",
+    "cmake": "4.4.5",
+    "godot": "4.7.2-stable",
+    "llvm_mingw": "20261020",
+    "ninja": "1.13.2",
+    "python": "3.12.14"
+  }
+}

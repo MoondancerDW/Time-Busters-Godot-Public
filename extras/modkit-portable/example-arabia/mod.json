@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "name": "Example teal box and one-shot tone",
+  "models": [
+    {
+      "resource_sha256": "be56218eb50e87b07bf0e4ca19dc888dd7867ce2e09d5d8f5c8fdf03f643da0a",
+      "source_chunk": 84429,
+      "source_id": 253,
+      "file": "box.glb",
+      "reference_extent_m": [
+        0.21,
+        0.21,
+        0.21
+      ]
+    }
+  ],
+  "sounds": [
+    {
+      "resource_sha256": "be56218eb50e87b07bf0e4ca19dc888dd7867ce2e09d5d8f5c8fdf03f643da0a",
+      "blob": 5,
+      "file": "click.wav"
+    }
+  ]
+}

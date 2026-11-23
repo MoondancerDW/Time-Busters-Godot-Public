@@ -1,0 +1,8 @@
+[configuration]
+entry_symbol = "tb_reference_library_init"
+compatibility_minimum = "4.7.2"
+reloadable = false
+
+[libraries]
+windows.debug.x86_64 = "res://bin/tb_reference.dll"
+windows.release.x86_64 = "res://bin/tb_reference.dll"

@@ -1,0 +1,2114 @@
+{
+  "build_index_sha256": "3170bc0b733f760416afc2f9665c235ea08f03b1b5a1d595ee97e420414ce09d",
+  "bundle_manifest_sha256": "50ce9695bdb3dd20eb033d45c7f2cdd70a0adc9cfea1069b5b624084bef5c4db",
+  "files": {
+    "NOTICE.md": {
+      "bytes": 1297,
+      "sha256": "732340142e867305e8ff77bf06841e882dec73bfed2f574240043236b2bf40ca"
+    },
+    "README.md": {
+      "bytes": 960,
+      "sha256": "5a82d35173cd54ec76b66a348969f1e36fda2a5dbc504cbb94bce779b35b0c35"
+    },
+    "RESTORE.md": {
+      "bytes": 2814,
+      "sha256": "1959f7cbe525d626cb28c18e3ffbb86670b329f01dca343d29ac3da40638292e"
+    },
+    "extras/modkit-portable/README.md": {
+      "bytes": 9030,
+      "sha256": "bd92ef598d837f35c5faf930e106dbf899ea676c2ca08bf5871c1a23c860daab"
+    },
+    "extras/modkit-portable/cosmetic_mods.gd": {
+      "bytes": 18767,
+      "sha256": "b2e1a4ab370ceb9c0bc113e66e37285c3dbb151982f91775c09702efd145c592"
+    },
+    "extras/modkit-portable/example-arabia/box.glb": {
+      "bytes": 856,
+      "sha256": "e3f9e97d95aedf2e01aa92dee10ece11213ef841d9e288d35f2032d50781ceb3"
+    },
+    "extras/modkit-portable/example-arabia/click.wav": {
+      "bytes": 5164,
+      "sha256": "3b33bf41516dc4bc924caca90d88329193e921bb49c4473cc97c0fbe0e8ce7d9"
+    },
+    "extras/modkit-portable/example-arabia/mod.json": {
+      "bytes": 546,
+      "sha256": "b3e4d0878ee7b5126d6e7edc2e49772acb0518da9795e6f38b9e10dbf1ac679f"
+    },
+    "extras/modkit-portable/modkit.py": {
+      "bytes": 15345,
+      "sha256": "96fc16628ea66c1d2b894fe59dda7ec55a77cb730fa50f590cabafb4ab3f3e43"
+    },
+    "extras/rebuild_native.py": {
+      "bytes": 12872,
+      "sha256": "f73aa74d484181fc9ec8992606c7eb211a3b6333350375a49e7cd62b4558482a"
+    },
+    "godot-accepted/native/tb_reference.gdextension": {
+      "bytes": 229,
+      "sha256": "6089f748bd81cc7a6f8c383d4caa26e741690785a2fafca2ea555dd1223e9741"
+    },
+    "godot-accepted/project.godot": {
+      "bytes": 905,
+      "sha256": "a016e90708204e7b1c17411a34023e98be845b4d364303d59f31e811c30dfa37"
+    },
+    "godot-accepted/reference/asset_layout.gd": {
+      "bytes": 1705,
+      "sha256": "740a2f6fa7672b5a4fa7096504cdf91217ed95df877531835778e4b3972acbdb"
+    },
+    "godot-accepted/reference/camera_obstruction.gd": {
+      "bytes": 4012,
+      "sha256": "f2c29ed2ae3cb6c6112cb2b8c8217bd948ff5b514647088f9117f9fd8ebdd5f2"
+    },
+    "godot-accepted/reference/checkpoint_store.gd": {
+      "bytes": 29051,
+      "sha256": "a0813157600c092e405c0d5cc602052d9dbd1bcab2ddb2add6beff40cbcfd811"
+    },
+    "godot-accepted/reference/main.gd": {
+      "bytes": 46541,
+      "sha256": "58da5769beecc90db060416e170fb2e6b9083bdf339435ed40d605b84a68321f"
+    },
+    "godot-accepted/reference/main.tscn": {
+      "bytes": 168,
+      "sha256": "4f3172ec67f09fa253bcb436133fd8e5959b16b7f57c62b2bbf927192d175ac6"
+    },
+    "godot-accepted/reference/native_audio.gd": {
+      "bytes": 13832,
+      "sha256": "c47cf3da716ae10abcd1bc23ca4199f0e13191962285def44b0e5afb7e019ddf"
+    },
+    "godot-accepted/reference/native_backdrop.gd": {
+      "bytes": 2354,
+      "sha256": "7b8d290ace9b992ef2edc297b72085e9238c739d87256c4acbdef00ec2a61fe8"
+    },
+    "godot-accepted/reference/native_effects.gd": {
+      "bytes": 1389,
+      "sha256": "644551f0fcc260b827687f12d8aa49fac6d409bf7a94baa34392ee1d4842aacc"
+    },
+    "godot-accepted/reference/native_hud_sprites.gd": {
+      "bytes": 4542,
+      "sha256": "5dd0d5c21f7b1af7f3ec9e9ef5d226a61c4f87d43c30eb7a4be01775ec0cb57e"
+    },
+    "godot-accepted/reference/native_overlay.gd": {
+      "bytes": 5979,
+      "sha256": "753628a47009444d4cebb56ba517359fb4f40e041df9f0e9187b266e06f0f872"
+    },
+    "godot-accepted/reference/pc_translucency.gd": {
+      "bytes": 1375,
+      "sha256": "a6b8976d1010cb90e8a22524fe6ed6b0925e4035813877d1f7346b76ebf0a87a"
+    },
+    "godot-accepted/reference/russian_overlay_font.gd": {
+      "bytes": 4279,
+      "sha256": "7cd42cba4e80bda8d1ea6553a1482158c79e73cc96236c27cea38d444ecd726c"
+    },
+    "licenses/GODOT-COPYRIGHT.txt": {
+      "bytes": 100108,
+      "sha256": "cb1980c88089573bcacd7221d777c689bb8bbd778799f24c27fca0fe5f774d6d"
+    },
+    "licenses/GODOT-LICENSE.txt": {
+      "bytes": 1149,
+      "sha256": "b0435e3b3e4e55238f05f4b306f30524a1b2e20147810d436eaa554fa6855c80"
+    },
+    "licenses/GODOT_CPP_LICENSE.md": {
+      "bytes": 1093,
+      "sha256": "26a5b210d90760156ce886267ce9df235787dcc6cebfd7ecd95ef5b6fdcc95bf"
+    },
+    "licenses/LLVM-LICENSE.TXT": {
+      "bytes": 15141,
+      "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+    },
+    "licenses/MINGW-COPYING": {
+      "bytes": 2326,
+      "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+    },
+    "licenses/MINGW-RUNTIME-COPYING.txt": {
+      "bytes": 12155,
+      "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+    },
+    "licenses/WINPTHREADS-COPYING.txt": {
+      "bytes": 2883,
+      "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+    },
+    "native/bridge/compat_decoded_script_patches.h": {
+      "bytes": 7138,
+      "sha256": "ddb5ffac476aecd568e34e682c86085fee279a3b29c7dbf595c4aa2e3df4f0dd"
+    },
+    "native/bridge/compat_script_patches.h": {
+      "bytes": 2456,
+      "sha256": "e9d5e5c389b4b90bd10a9cc56c0dcd3f39975c9d33f973c8a186775a6c54fe2b"
+    },
+    "native/bridge/native_audio_output.hpp": {
+      "bytes": 8503,
+      "sha256": "f1eb05f9fa80a2a7ede62e48b224fc285aec2e73f3faa3ad43800588641d1150"
+    },
+    "native/bridge/reference_bridge.cpp": {
+      "bytes": 51602,
+      "sha256": "3b9824d18cd8ed25a0446cc774e0527da726267e728889f4280c0a42bf90fdc7"
+    },
+    "native/bridge/tb_reference_bridge.hpp": {
+      "bytes": 2516,
+      "sha256": "0c5962a8619ca1a03f1d3278d7a165e3d694bc0ee79c38f74db52efae0f8dc84"
+    },
+    "native/libraries/libref_codec.a": {
+      "bytes": 3209482,
+      "sha256": "043ae8bf0b20fd9cbfe5e60b303d9ed2218ab7dfac1def6a06924e0c4512e580"
+    },
+    "native/libraries/libref_core.a": {
+      "bytes": 61058364,
+      "sha256": "93f1ba47d9a917bb48cce3644caed1137b9253e5640c7342ff5fa7c3b76314ff"
+    },
+    "native/libraries/libref_game.a": {
+      "bytes": 61147852,
+      "sha256": "e956f9f22f75adde39c1ff35e2039c56cc3b1cbdec1f095b296ea42b4e7db862"
+    },
+    "native/libraries/libref_stb.a": {
+      "bytes": 447052,
+      "sha256": "83a277e25d3a0f49a17302567e70939f2c17ebba1bfe2d798a54040ea90f07b5"
+    },
+    "native/reference/.gitignore": {
+      "bytes": 180,
+      "sha256": "9cea7343e02927e355354a4bba1232a8b70af48e25f4406e0998d4ca293a3a17"
+    },
+    "native/reference/CHANGELOG.md": {
+      "bytes": 66949,
+      "sha256": "26d82ae019b86a2ffbff4eb0f95566ccfb61bed99262301e6dd628a9465b5010"
+    },
+    "native/reference/CMakeLists.txt": {
+      "bytes": 1378,
+      "sha256": "a3238042eeb93aecf45a8532c6d075543df269505fedc65887d3b68a7c18953b"
+    },
+    "native/reference/README.md": {
+      "bytes": 2625,
+      "sha256": "6cb93eabb58a77bc3ccf616bbfe76d6c80cab22319468a9695795c9ee5312c9c"
+    },
+    "native/reference/apps/bbtime/CMakeLists.txt": {
+      "bytes": 527,
+      "sha256": "377f0d38cd703e44541fdbd4252c7d3b7f07947945af10cd5bb754c2956582f8"
+    },
+    "native/reference/apps/bbtime/fixed_step.h": {
+      "bytes": 942,
+      "sha256": "ae0b423b0250d4329b4f288fac0df203ec7c27f9268273fb313dddfded8b3754"
+    },
+    "native/reference/apps/bbtime/level_hook.cpp": {
+      "bytes": 10502,
+      "sha256": "0653a0764218b86d02dca57b104a508deb553b0a6a45b9c4295b364aeef0e183"
+    },
+    "native/reference/apps/bbtime/level_hook.h": {
+      "bytes": 1833,
+      "sha256": "68f1874680eca8f23e002774e5682eebdd6ef9b7f5ee42ca346da54947aab55f"
+    },
+    "native/reference/apps/bbtime/main.cpp": {
+      "bytes": 153631,
+      "sha256": "a3c423403cf9c78fbf1450296db5b2b78acaacfe93f0835cef9dfe5e01c62d7e"
+    },
+    "native/reference/apps/bbtime/music.cpp": {
+      "bytes": 4219,
+      "sha256": "03a4b61700903c3c5e2ee84fc8c0dfd357037e5bb34733751ebf8313c3f4b1c2"
+    },
+    "native/reference/apps/bbtime/music.h": {
+      "bytes": 2108,
+      "sha256": "d2a110714cf779a96d2ac01e06b4a83585a8107cb3f6c4b3d4ae3eb29835078d"
+    },
+    "native/reference/apps/bbtime/play.cpp": {
+      "bytes": 14993,
+      "sha256": "ea7053db0141bdb6debfbb4dd86e962abb72b18a98669aab93780d8b0fce4773"
+    },
+    "native/reference/apps/bbtime/play.h": {
+      "bytes": 5896,
+      "sha256": "55711c42e533e2ff2285d1d8b858acd88a1dea9a6072f48675ec1cefe9e05026"
+    },
+    "native/reference/apps/bbtime/settings.cpp": {
+      "bytes": 9944,
+      "sha256": "d0a8805d751c81bcae34524cee04da383e2f9e20ee1c82fd3ee3ec58fceb37be"
+    },
+    "native/reference/apps/bbtime/settings.h": {
+      "bytes": 7143,
+      "sha256": "53cc1bb03f6b95b9dc38d2e46eb03febfa7fd7364c8db119192054f72888859b"
+    },
+    "native/reference/apps/bbtime/tb_front.cpp": {
+      "bytes": 45057,
+      "sha256": "bebfa0faa13da4e67c3bb4679012cbb8c144f107ccd486472a25030bde6741ec"
+    },
+    "native/reference/apps/bbtime/tb_front.h": {
+      "bytes": 2977,
+      "sha256": "1a2a29cd51bee4bd91c03e04bd7e8c91d23224ca57b419becd9eb9728d38d7db"
+    },
+    "native/reference/apps/bbtime/test_fixed_step.cpp": {
+      "bytes": 616,
+      "sha256": "b7aac20e40f95c4668ee9138d79f3412bb9fcf18b8f4f4d6e836727eee46770c"
+    },
+    "native/reference/apps/launcher/CMakeLists.txt": {
+      "bytes": 3241,
+      "sha256": "6c4736f44b71d3920f921cb91f5966ae2d295311c91bf6b0c6699b7407816c8e"
+    },
+    "native/reference/apps/launcher/files.cpp": {
+      "bytes": 6542,
+      "sha256": "0b26ac1904921a845d547ba90455727bef42618dcf6aa76b995765eefc492316"
+    },
+    "native/reference/apps/launcher/files.h": {
+      "bytes": 1982,
+      "sha256": "303265a2fbed0d263a1bb9e95a8532420ed98623d273e170c8cda19ae6c52112"
+    },
+    "native/reference/apps/launcher/main.cpp": {
+      "bytes": 89355,
+      "sha256": "8901fc9910e015f5b97e19a5439c71789b03394fe7221152e0b1984f30015446"
+    },
+    "native/reference/apps/launcher/tests/https_server.py": {
+      "bytes": 2617,
+      "sha256": "7ecca352606ebb00d596dbcde78100f34f8f2a489e584b60f4ff35e3fd9bf4fb"
+    },
+    "native/reference/apps/launcher/tests/test_files.cpp": {
+      "bytes": 4317,
+      "sha256": "7d265528fdb772deea9fd2d9a1ffca381f3a7d1872a56e73cd0dcf8314c2920b"
+    },
+    "native/reference/apps/launcher/tests/test_settings.cpp": {
+      "bytes": 4200,
+      "sha256": "e03b21b5392a7b232fffab288eb7b0836546537f7ac55f9478227fa893f27f9d"
+    },
+    "native/reference/apps/launcher/tests/test_updater.cpp": {
+      "bytes": 14362,
+      "sha256": "fac59690732a70b221749a627a50e8297875c8145d8f843a06689ed170fe4fd1"
+    },
+    "native/reference/apps/launcher/updater.cpp": {
+      "bytes": 17637,
+      "sha256": "91a8e8089a90f2fafa873f2a80fb526f0bc9411a9830ac0f016c5da4e97d63f1"
+    },
+    "native/reference/apps/launcher/updater.h": {
+      "bytes": 6535,
+      "sha256": "1602b918738926c3bdff7ddad04f7fdf61867f042594bf8b69ebe9349b7d29be"
+    },
+    "native/reference/docs/ENVIRONMENT.md": {
+      "bytes": 2697,
+      "sha256": "faf88764f625cd94918234955855ac4c2093756a8a8b7ea6ef55cfab20944b6c"
+    },
+    "native/reference/docs/EXISTING_PROJECT_AUDIT.md": {
+      "bytes": 12350,
+      "sha256": "b2821ee28265fdb16d4e8049e7cc822b5ced147fc096883b50bed5b75d313e5e"
+    },
+    "native/reference/docs/GAMEPLAY_STATUS.md": {
+      "bytes": 81609,
+      "sha256": "b5aa863fb0a43a1e0b14f92718c1e42d3aef419bd8b05b7a7af2baef6b964b87"
+    },
+    "native/reference/docs/LAUNCHER.md": {
+      "bytes": 12405,
+      "sha256": "eb2f0944c690d10587cf67fc3ffc22f60a5294eea817f11426e463ec8cf7d349"
+    },
+    "native/reference/docs/MODDING.md": {
+      "bytes": 14686,
+      "sha256": "8237e2763687e3dc1d18fd7569c403fba2fa242682a636849d792605c94bccb0"
+    },
+    "native/reference/docs/RESEARCH.md": {
+      "bytes": 46562,
+      "sha256": "a128c1369656986c718b6d99a4c88c4c4e3d5cf972b525fd27d988915011f7a5"
+    },
+    "native/reference/docs/ROADMAP.md": {
+      "bytes": 25280,
+      "sha256": "b19403100432d51a92e5afd5100b58b03133e4b02b922042064150cd0a48cf17"
+    },
+    "native/reference/docs/UPDATES.md": {
+      "bytes": 7503,
+      "sha256": "e021e23097f7218ed8c40982d74890c8648a2a75e32c333beb379e5010daecd9"
+    },
+    "native/reference/docs/formats/AUDIO_XA.md": {
+      "bytes": 17967,
+      "sha256": "87f243c70a2e5bc41b4ad62beb2c427a8c820b639a95daba15dd6c6fcabd5e26"
+    },
+    "native/reference/docs/formats/BZE.md": {
+      "bytes": 8417,
+      "sha256": "fe4e7046949984ce39e0a3b044acbb347685ee8232d35e1d0e391464d0e4f857"
+    },
+    "native/reference/docs/formats/MODELS.md": {
+      "bytes": 33220,
+      "sha256": "be4e12926690813424e1a90f5e9177adb0a13bdd3309e9761f054bdcc943519b"
+    },
+    "native/reference/docs/formats/SAVE_LIT.md": {
+      "bytes": 4685,
+      "sha256": "bda98a2ab24e6aa9843ebf70dcfc7123eb7c0bcbafb98232c6997069c2fee83f"
+    },
+    "native/reference/docs/formats/SAVE_TB.md": {
+      "bytes": 3434,
+      "sha256": "268856a663d0d1c764dc1952f929f773eeae0bc78fc1bb5b6a63a5b6c36cc910"
+    },
+    "native/reference/docs/formats/TB_LEVELS.md": {
+      "bytes": 19607,
+      "sha256": "a6d8f6ae1849d8bb0ed7679aa2949cd75c8f181608955c61be1e10163fb84596"
+    },
+    "native/reference/docs/formats/TEXTURES.md": {
+      "bytes": 10134,
+      "sha256": "61943852e498880e0b326f872c1d18cead4309a546078fdb780c6baf3ce4b480"
+    },
+    "native/reference/docs/formats/TEXTURE_GAP.md": {
+      "bytes": 9036,
+      "sha256": "38f68ca97bd9c09e505c2270266c1dce4016b76aea3c25d2876da29b9c416b2e"
+    },
+    "native/reference/docs/re/ENGINE_COMPARISON.md": {
+      "bytes": 23999,
+      "sha256": "e48896aeca3f946ed86ecfb5154654c7cd58e1c3c87db937a6caddafdd88546c"
+    },
+    "native/reference/docs/re/GAMEPLAY.md": {
+      "bytes": 80242,
+      "sha256": "dc02dabc1f789e5555d53c9515e3915e80ca50a225e8b69112fdf01a22322d6e"
+    },
+    "native/reference/docs/re/GAMEPLAY_TB.md": {
+      "bytes": 75425,
+      "sha256": "47cdfc68dab898dc1543486704dce5ea1d688e5db34d128b11898464bf79f8d7"
+    },
+    "native/reference/docs/re/LOGIC.md": {
+      "bytes": 31091,
+      "sha256": "40acb0fbced968edcf84721f3de2440300ba0159f8f179291029046f3e97ac49"
+    },
+    "native/reference/docs/re/LOST_IN_TIME.md": {
+      "bytes": 6626,
+      "sha256": "38ee50b4198214510a66fcfb097513fb451ae2be57141bf636395b509d17f625"
+    },
+    "native/reference/docs/re/RUNTIME_REFERENCE.md": {
+      "bytes": 143921,
+      "sha256": "55098f2ea71f41306f5a5cbc16e0bc0e6fbebbd11c7f15133f7dee82394fc29a"
+    },
+    "native/reference/docs/re/TIME_BUSTERS.md": {
+      "bytes": 28999,
+      "sha256": "aa54929d04b9348bb966a58f0b599fcff0e7957c003ef71a58b4a39a7b73e3f0"
+    },
+    "native/reference/docs/research/web.md": {
+      "bytes": 22898,
+      "sha256": "29484cb77d2e6831e3dd54c7f8ccf38678172da0c196a1de7e270308b8bcb447"
+    },
+    "native/reference/engine/audio/CMakeLists.txt": {
+      "bytes": 900,
+      "sha256": "d2cd68e35004df4dd50712c1a6da99fb13159d0cfd8336e338cfe3033d575dd3"
+    },
+    "native/reference/engine/audio/include/bb/audio.h": {
+      "bytes": 8320,
+      "sha256": "4b11a4fb96735270366d395cf76d69758a5c1fac17ad1d086bd74348005ea11a"
+    },
+    "native/reference/engine/audio/src/codec.cpp": {
+      "bytes": 14958,
+      "sha256": "aeed8392b4039c94f14fe6270649d6b28ba98c9c94e3e08e250da407c691bdce"
+    },
+    "native/reference/engine/audio/src/device.cpp": {
+      "bytes": 8255,
+      "sha256": "c83fb0b35ff69284a64668653a0c091c66ad2281b32fffeb80ba9af080245384"
+    },
+    "native/reference/engine/audio/tests/test_codec.cpp": {
+      "bytes": 7150,
+      "sha256": "07973e58933c5dd9fb4bbab58a2dbf1911a83b8c9490d27aefca884c0ebc1522"
+    },
+    "native/reference/engine/audio/tests/test_realdata.cpp": {
+      "bytes": 4463,
+      "sha256": "7c76932cd2b5616af27139d4c29b2c37b8c786915d0e4ce06840752a3cecb781"
+    },
+    "native/reference/engine/audio/tools/xa2wav.cpp": {
+      "bytes": 1484,
+      "sha256": "fe5ecba110ac98f7f8a59e1cd7cb8cda5bc3d032f57297d27299c8aae7dcb56d"
+    },
+    "native/reference/engine/core/CMakeLists.txt": {
+      "bytes": 492,
+      "sha256": "1f7714a2cbda5f0cc8b6b86bd5fcd04487edf79bfee2dba48c99efce1ed3f04a"
+    },
+    "native/reference/engine/core/include/bb/actor.h": {
+      "bytes": 7769,
+      "sha256": "e9bf24832e206ec924d84a7ffdb3407f7554770542594347ac922b21236308da"
+    },
+    "native/reference/engine/core/include/bb/bze.h": {
+      "bytes": 2228,
+      "sha256": "43952ccb0c0b2fb94f63a293cbbf3945cc68001d58d322770906756d414241ba"
+    },
+    "native/reference/engine/core/include/bb/level.h": {
+      "bytes": 1513,
+      "sha256": "feeb6978e18946a879586fa4ca91fadf1be7fc7d8006334ff1e474c0d7b69f46"
+    },
+    "native/reference/engine/core/include/bb/levelscript.h": {
+      "bytes": 1676,
+      "sha256": "8138718bd238798a238dc29aaad2b7a492ca180c241f9c887681d72a88f2af39"
+    },
+    "native/reference/engine/core/include/bb/lzss.h": {
+      "bytes": 1141,
+      "sha256": "7dee860beabf34f3b7882fad23466a00d27a2f8aae9f053dad69405ef980e141"
+    },
+    "native/reference/engine/core/include/bb/manifest.h": {
+      "bytes": 2030,
+      "sha256": "4663e8f805dc2b02a14b4637240bfd8b1a44e39398394bb9f0518919320090c2"
+    },
+    "native/reference/engine/core/include/bb/mods.h": {
+      "bytes": 6805,
+      "sha256": "a039346e9eff292926c9b054a6fca82431a761c1e4279427855f7e5e48991a71"
+    },
+    "native/reference/engine/core/include/bb/scene.h": {
+      "bytes": 13176,
+      "sha256": "4ab674f7f06954830b0ce237a2cb7f57b640518b7295511499d9d44990d228ae"
+    },
+    "native/reference/engine/core/include/bb/tb_actor.h": {
+      "bytes": 1905,
+      "sha256": "5d92c6319e968eb39ffec055e7f0d38d96092303508e3b8ec9e029c1a56cd2bf"
+    },
+    "native/reference/engine/core/include/bb/tb_level.h": {
+      "bytes": 3419,
+      "sha256": "969386f0102e21de064e7999b1e3b70eb0b2ba4a3c47bd09a74ed19d52e44e48"
+    },
+    "native/reference/engine/core/include/bb/tim.h": {
+      "bytes": 1016,
+      "sha256": "6934bad97e84c551b749ad51369d70ad48fbf75ffd79ca61a597fc1809a99bb6"
+    },
+    "native/reference/engine/core/src/actor.cpp": {
+      "bytes": 23339,
+      "sha256": "3a6589d45f6fca0f117f61d3e76b211ad656acc4cdfd14f50304c0bf0a906a1d"
+    },
+    "native/reference/engine/core/src/bze.cpp": {
+      "bytes": 4010,
+      "sha256": "1d74c4431716b64bd60c4de4e865fb185bc20824952e3a06bea17df16b3fa69c"
+    },
+    "native/reference/engine/core/src/level.cpp": {
+      "bytes": 43306,
+      "sha256": "812ce5a5bc9f41188ce45f26be06a7b6fe558e4de192e8800cd1da3b05a8b22a"
+    },
+    "native/reference/engine/core/src/levelscript.cpp": {
+      "bytes": 6079,
+      "sha256": "0c65fc3fb8fe82e2738cfdb748c8d0d7d2b941c640f34ffa68e62eb43efe8808"
+    },
+    "native/reference/engine/core/src/lzss.cpp": {
+      "bytes": 2802,
+      "sha256": "9d89137cfeefacf57561a880303150b1227d0f3829dc7a92ef9c485c3a5dc5cc"
+    },
+    "native/reference/engine/core/src/manifest.cpp": {
+      "bytes": 10398,
+      "sha256": "44013957d9a87dd5c36eeb4006724ae5da4114475b7472e4bc2ee73bb27a896c"
+    },
+    "native/reference/engine/core/src/mods.cpp": {
+      "bytes": 14811,
+      "sha256": "fd08e1fe119383fe35cf0509c252d1d6d70472d405b2e03d2ece6b2f69c9bdc0"
+    },
+    "native/reference/engine/core/src/mods_gltf.cpp": {
+      "bytes": 69157,
+      "sha256": "faf85d95256cad5d08a77425f265ad7763b986a651b3b749b314c0d21805c3a1"
+    },
+    "native/reference/engine/core/src/mods_internal.h": {
+      "bytes": 778,
+      "sha256": "f4130193f2df37df647d4e8e1afb2fd3a90d870d58333a78c16dce5d5b2433ae"
+    },
+    "native/reference/engine/core/src/tb_actor.cpp": {
+      "bytes": 20316,
+      "sha256": "ff0ae2a5f4ab4f786fc7bad2f92d3d21129a2cc1db27a76f4f8be1a143bae9ee"
+    },
+    "native/reference/engine/core/src/tb_level.cpp": {
+      "bytes": 41913,
+      "sha256": "bfe11967467a4e129e12ad323d1651a8cbe703cb11c7e09185177a20f5fc6d76"
+    },
+    "native/reference/engine/core/src/tim.cpp": {
+      "bytes": 3167,
+      "sha256": "fd801fedb7061b72f2d6d87da8d787091ffa4887c7029185c14e0fb2588d549c"
+    },
+    "native/reference/engine/game/CMakeLists.txt": {
+      "bytes": 4073,
+      "sha256": "571bbfa3faad78211bc6cbbd43d9bf4ae0dff51388261698519d6e38569869e9"
+    },
+    "native/reference/engine/game/include/bb/game/heightfield.h": {
+      "bytes": 2861,
+      "sha256": "ea5596d16c57e8684ccae4a0a14daafaf15cafc8e5bb353308858c2d2cf095f8"
+    },
+    "native/reference/engine/game/include/bb/game/lit_save.h": {
+      "bytes": 4688,
+      "sha256": "7b64ae43eee2beb5bc0028cc516eabedcca483c805693527af8f0f1d14c7ace2"
+    },
+    "native/reference/engine/game/include/bb/game/lit_world.h": {
+      "bytes": 43059,
+      "sha256": "227ecb1021a3e24c2813924ba5df53eb4ce4dca4585b20713bb9b1fdcc0f06d8"
+    },
+    "native/reference/engine/game/include/bb/game/litmath.h": {
+      "bytes": 6205,
+      "sha256": "3f8915be915d38750e1845e2bd84a1b40b5c4bd941fcf17e8f8cbecc5992ac31"
+    },
+    "native/reference/engine/game/include/bb/game/pad.h": {
+      "bytes": 4686,
+      "sha256": "e731530ece81d36be940130e3f0ff05c1d7bfd92ff898eb501c108f6c1a1b625"
+    },
+    "native/reference/engine/game/include/bb/game/sfx.h": {
+      "bytes": 6366,
+      "sha256": "0e04847d56b51f3bd8a24158787356b8b5bad845c4789b63c6d0713cfb3086fa"
+    },
+    "native/reference/engine/game/include/bb/game/tb_collision.h": {
+      "bytes": 3390,
+      "sha256": "2aba9c491be95a1d87ce95bc057a88d13c3bc5b9747b374248ab79b4cab8150c"
+    },
+    "native/reference/engine/game/include/bb/game/tb_dialog_metrics.h": {
+      "bytes": 536,
+      "sha256": "4dd9be4e05b83c4c7f2459272fefc7785e19033dfb4b8e194d56c81cede7a9d6"
+    },
+    "native/reference/engine/game/include/bb/game/tb_menu.h": {
+      "bytes": 3683,
+      "sha256": "3e0adc91ed6bb71d77ed11a2ab27b0c1333c6053f710da01748acc389ae16475"
+    },
+    "native/reference/engine/game/include/bb/game/tb_save.h": {
+      "bytes": 1806,
+      "sha256": "5f1af4f0c2e13a261bae96a459d37ac54c6b9f8d231ebe1482946f9ac677837f"
+    },
+    "native/reference/engine/game/include/bb/game/tb_world.h": {
+      "bytes": 58405,
+      "sha256": "bd314ed449f12b2c9e3ec826a82824daaf645d022cbb0eabadb714fcc870f4a1"
+    },
+    "native/reference/engine/game/src/heightfield.cpp": {
+      "bytes": 17425,
+      "sha256": "bb1658b6c6c03c4d1adc6097121c235d21d7228de1f11575b3d860f642a87618"
+    },
+    "native/reference/engine/game/src/lit_actors.cpp": {
+      "bytes": 136213,
+      "sha256": "37d938955d9ebe3c88e2f1a5d00081c67ecd93f81ab7e44955f6b97fdba55ec7"
+    },
+    "native/reference/engine/game/src/lit_hud.cpp": {
+      "bytes": 13998,
+      "sha256": "ba55220a4c0db66d3b1e08963cee94fde01c64c508dc8dbbcd1245203a27dea7"
+    },
+    "native/reference/engine/game/src/lit_logic.cpp": {
+      "bytes": 23975,
+      "sha256": "e0194a7edbe5fe19e9c00ee62c369e5e04c46b60876d3e00d6313b14425b3229"
+    },
+    "native/reference/engine/game/src/lit_overlay.cpp": {
+      "bytes": 13984,
+      "sha256": "4d473ae570dbbd7e49821a5cc5499c6d2a5fe3b43adc2cf689a0db1b059801af"
+    },
+    "native/reference/engine/game/src/lit_save.cpp": {
+      "bytes": 7523,
+      "sha256": "c76fc90037725323b0f059737fc1f64b67727ecd9b5b62d5738b05a70836492f"
+    },
+    "native/reference/engine/game/src/lit_world.cpp": {
+      "bytes": 110122,
+      "sha256": "a20860f47a8ab7af843139c96190915d3660a938917d8ce6dd98ca9fca99e411"
+    },
+    "native/reference/engine/game/src/pad.cpp": {
+      "bytes": 4972,
+      "sha256": "1cb1f5944f0c9f66cd8f375d5346e0ac293c8a2d9ae37b70a9052faba1092d75"
+    },
+    "native/reference/engine/game/src/sfx.cpp": {
+      "bytes": 12527,
+      "sha256": "405fc5c0d589419de9e05ab9783bac47dd9062716288db3639cae561ca7fab68"
+    },
+    "native/reference/engine/game/src/tb_collision.cpp": {
+      "bytes": 8739,
+      "sha256": "09d997eb6cb3def47770d59bc1393364ca86c3c585369b378ac38bf14f9d88b6"
+    },
+    "native/reference/engine/game/src/tb_entities.cpp": {
+      "bytes": 82234,
+      "sha256": "bc6ef5a732dd57c9f50dd1451532581cd36c3612c3d692cccdb9f88516ef86f0"
+    },
+    "native/reference/engine/game/src/tb_fx.cpp": {
+      "bytes": 25696,
+      "sha256": "81c9bf27fd13f8a1c53792edeedd22550e69ec5d85d957aea21bc5fcd18b80e6"
+    },
+    "native/reference/engine/game/src/tb_gte.h": {
+      "bytes": 10719,
+      "sha256": "5eec7c543ef2862ccdab10409a03924d0f7d684ab890a54371729b9c8f488ca1"
+    },
+    "native/reference/engine/game/src/tb_hud.cpp": {
+      "bytes": 53043,
+      "sha256": "99d5ed4261ab29d184cc58591b6a0dc53349fcc7be8489d1d03d4db291ac8dd2"
+    },
+    "native/reference/engine/game/src/tb_menu.cpp": {
+      "bytes": 8900,
+      "sha256": "864134c48df0d48fa1da040f527a5113c712c75b06882b557ba98eb6e77102ad"
+    },
+    "native/reference/engine/game/src/tb_mover.cpp": {
+      "bytes": 24858,
+      "sha256": "a79f4c83109a1bd893b68043fa3d91276a82428edecdd2eb770d99099e34135d"
+    },
+    "native/reference/engine/game/src/tb_path.cpp": {
+      "bytes": 17742,
+      "sha256": "83ab503fdc5ff7041c122540f3fa197f264b77c05e58b14f8303debf357fb714"
+    },
+    "native/reference/engine/game/src/tb_save.cpp": {
+      "bytes": 2758,
+      "sha256": "b373ade6eaa116496940af2469572e25444e6d1cad73340583fc3c7197b971ea"
+    },
+    "native/reference/engine/game/src/tb_shadow.cpp": {
+      "bytes": 4487,
+      "sha256": "f1b5227628967d3b6ab70978217e858ba3162d5327ca142fc98cfdc491d4a286"
+    },
+    "native/reference/engine/game/src/tb_shapes.cpp": {
+      "bytes": 33950,
+      "sha256": "ddb35aeca06d596b9a3387504563117c1cf4cb8cc623d7192115104c7d8e706b"
+    },
+    "native/reference/engine/game/src/tb_shapes.h": {
+      "bytes": 10151,
+      "sha256": "d33e4302a81ad1058be5737ffce8aa6821b6535cc5797140f7f6a1398e185516"
+    },
+    "native/reference/engine/game/src/tb_steer.cpp": {
+      "bytes": 18264,
+      "sha256": "22e00d0f8fd9dbe8c1831b725f85a1a8acd9a693dc3faeff7fbe5f5e4d21b5c0"
+    },
+    "native/reference/engine/game/src/tb_sweep.cpp": {
+      "bytes": 98369,
+      "sha256": "23db22906fcd8ae116e77d1091b4b18e9d6c46feae990fefdea856eef43ba2f5"
+    },
+    "native/reference/engine/game/src/tb_sweep.h": {
+      "bytes": 24000,
+      "sha256": "efaf74a66ca0e84d2244b2cd8ec8f46214f9ffd324c972f16a7ef1475f1704d4"
+    },
+    "native/reference/engine/game/src/tb_world.cpp": {
+      "bytes": 166960,
+      "sha256": "330f91a8f487544e8548e17c824677053bb8dc90545bc32494ab8f78b14b5dfb"
+    },
+    "native/reference/engine/game/tests/tb_carry.inc": {
+      "bytes": 37075,
+      "sha256": "bd4fbfa1721e7bae67984b88550f30d722586472762aa0fc3a7ee5db5e7c1f12"
+    },
+    "native/reference/engine/game/tests/tb_checks.inc": {
+      "bytes": 1268334,
+      "sha256": "648a5da4dcc798c2d8f3b3e184e7d867a5043e70b98baec9463a2341ecd52fec"
+    },
+    "native/reference/engine/game/tests/tb_class30.inc": {
+      "bytes": 47114,
+      "sha256": "c0a9b863e92a10f31439b25e1160c734b1e608273e7dce279a051acc5572f594"
+    },
+    "native/reference/engine/game/tests/tb_classes.inc": {
+      "bytes": 144535,
+      "sha256": "67bc95ff7069163423b6e2e6e18b93a6a73287c6d69ca5ad7c3644be05758bc4"
+    },
+    "native/reference/engine/game/tests/tb_climb.inc": {
+      "bytes": 98450,
+      "sha256": "1bc69e870d9080055d035b3c44fbb2548c11b7219e6fb870d69f65793c670350"
+    },
+    "native/reference/engine/game/tests/tb_fx_granny.inc": {
+      "bytes": 79960,
+      "sha256": "5fda2b359dd69545a47570c799204d60a0473ff2ed133f892a16fdf3ceea937a"
+    },
+    "native/reference/engine/game/tests/tb_shadow.inc": {
+      "bytes": 10287,
+      "sha256": "869afb7760690e9626dd143ebdfb4e5f9c73c967933f767d39d0b99b8fb9c95c"
+    },
+    "native/reference/engine/game/tests/tb_throw.inc": {
+      "bytes": 37395,
+      "sha256": "84c984b41f92f6c8a0e11381712eff33e3c604d127f442921014801d30439c3d"
+    },
+    "native/reference/engine/game/tests/test_game.cpp": {
+      "bytes": 101818,
+      "sha256": "2fe8984b212a4ac850afbdfa878ff2cc2ca9b2bf678e330974fb5ba0d4cbd2d5"
+    },
+    "native/reference/engine/game/tests/test_lit_overlay.cpp": {
+      "bytes": 13761,
+      "sha256": "bb2b85188b4ff163434621b915e815b3894aa118526ef596b1dc9bdb9948b9db"
+    },
+    "native/reference/engine/game/tests/test_lit_save.cpp": {
+      "bytes": 7341,
+      "sha256": "ed0a20a3baf4a4221fdf5e9b9ae35c30a2c9f5842b08bda05bb6ea0b6464b1b3"
+    },
+    "native/reference/engine/game/tests/test_lit_title.cpp": {
+      "bytes": 6122,
+      "sha256": "da7def6ccf8a415b62f13ea0fe0acf5dbec2581c13346c8fbaea91f41c61ed71"
+    },
+    "native/reference/engine/game/tests/test_sfx.cpp": {
+      "bytes": 12330,
+      "sha256": "58ef72490824e256fb039ef127beefe754623d42de43f9879cc61ab1bd57808b"
+    },
+    "native/reference/engine/game/tests/test_tb.cpp": {
+      "bytes": 217451,
+      "sha256": "de27397a02f16fddc597817cb262e24a4e5c6d20386eecc05537b05c22690af7"
+    },
+    "native/reference/engine/game/tests/test_tb_menu.cpp": {
+      "bytes": 5502,
+      "sha256": "f0d77fa98c5f736f33ef1a0ad8ee1ac9cdbdd42d1fefed36f8ecf629e205c54f"
+    },
+    "native/reference/engine/game/tests/test_tb_save.cpp": {
+      "bytes": 5871,
+      "sha256": "bc436fadcad6df79782ddb1db6e59e66a6b4650d3d1d131d4a61bc074427ab06"
+    },
+    "native/reference/engine/game/tests/test_tb_speech.cpp": {
+      "bytes": 3281,
+      "sha256": "3019454c3c94fa3eef63ace02f875a562b40e373f37d9ad832bd6277b7669cf0"
+    },
+    "native/reference/engine/render/CMakeLists.txt": {
+      "bytes": 656,
+      "sha256": "3a55825057045b4219a86243557a1db941990187b68dafdda7ca948bdda6cfdb"
+    },
+    "native/reference/engine/render/include/bb/render/bmp.h": {
+      "bytes": 804,
+      "sha256": "2130e2588f1de27d3f454928b14d03a73dc8c921a14337c67f68609891fd3e07"
+    },
+    "native/reference/engine/render/include/bb/render/camera.h": {
+      "bytes": 1678,
+      "sha256": "9917e1387d77ad947b48d4564246f962c1e04c42b9a8891fe4c701ed616af6d5"
+    },
+    "native/reference/engine/render/include/bb/render/pc_order.h": {
+      "bytes": 2537,
+      "sha256": "fce43189b5081a1dafbc80b3e4dd3db3e7f6cce58bae18ad80134eda41c51503"
+    },
+    "native/reference/engine/render/include/bb/render/renderer.h": {
+      "bytes": 11816,
+      "sha256": "582399f6d6243eebf9372118e24fbfd01b4c2a0000c8614d69c7d7a856b823ab"
+    },
+    "native/reference/engine/render/include/bb/render/water_waves.h": {
+      "bytes": 4273,
+      "sha256": "5a5226742ee10962e26823bcba7edfea54c76b472fc34e34bb3d21c22b171421"
+    },
+    "native/reference/engine/render/include/bb/render/zones.h": {
+      "bytes": 1757,
+      "sha256": "0cf380a159af66ede2ba63c4359bbfbc3192f5c0dfdcd28c6eb9edf1562337ef"
+    },
+    "native/reference/engine/render/src/bmp.cpp": {
+      "bytes": 3203,
+      "sha256": "27fbe16264e55e9a680d31441acbb149e2f20b21d6f7539445d974ba380d0c35"
+    },
+    "native/reference/engine/render/src/camera.cpp": {
+      "bytes": 1313,
+      "sha256": "7022bab55c17edd9ef044324b90b5067a1c0842cd25e5d0fd3a0408db149a6c3"
+    },
+    "native/reference/engine/render/src/renderer.cpp": {
+      "bytes": 31795,
+      "sha256": "9de0fb764ac1c7533d4db113c6b29c64a37d3ea5b2616bffd5a236c03605ec5c"
+    },
+    "native/reference/engine/render/src/water_waves.cpp": {
+      "bytes": 12964,
+      "sha256": "11d9b19c35587887a5267aa0999cf8dfbe87c6e691cbfe06dc92cb0f5825e5e1"
+    },
+    "native/reference/engine/render/src/zones.cpp": {
+      "bytes": 4438,
+      "sha256": "c4f47e0d7fb1c7845a527bd1a5672e9ce5c507d1f72dfeb91b62387d25fd89c9"
+    },
+    "native/reference/engine/render/tests/test_bmp.cpp": {
+      "bytes": 3721,
+      "sha256": "4bbc1e2462ee1b72521b39ef05f91d204b54e8206d4d79710b582b0ed74e04ab"
+    },
+    "native/reference/engine/render/tests/test_projection.cpp": {
+      "bytes": 2260,
+      "sha256": "93493504463f3fb057627460821af2bab421da24bb485d4076948f5630f45689"
+    },
+    "native/reference/engine/render/tests/test_water_waves.cpp": {
+      "bytes": 3702,
+      "sha256": "cee273b2bb510ddb55a4a55e3e768c551beb596e82b9bb1e9f04711e36909e6c"
+    },
+    "native/reference/engine/render/tests/test_zones.cpp": {
+      "bytes": 6692,
+      "sha256": "19c725770ebd62c16969becce88809658e017b92a920ba79f83768d0485d735d"
+    },
+    "native/reference/engine/render_vk/CMakeLists.txt": {
+      "bytes": 2842,
+      "sha256": "f166bcaea3bb973c3a6a2e316425b66d0a19c3469973f501a54f1018ca92418d"
+    },
+    "native/reference/engine/render_vk/include/bb/render_vk/renderer.h": {
+      "bytes": 22308,
+      "sha256": "6f1fe893fb1cc9d545e75bbdb46aa1e71d6e03e6609526d396962f0c598df7b7"
+    },
+    "native/reference/engine/render_vk/shaders/scene.frag": {
+      "bytes": 30264,
+      "sha256": "f46bbd37ec3e77b6713d987bc8ce3fa01400bacb4f75ca01425d4562ac3f11be"
+    },
+    "native/reference/engine/render_vk/shaders/scene.vert": {
+      "bytes": 3492,
+      "sha256": "601dd8e84ff14b4257172fa3315c75429f2e34a4e065718152de8affaa3a45a6"
+    },
+    "native/reference/engine/render_vk/shaders/shadow.frag": {
+      "bytes": 655,
+      "sha256": "8be6ddef94ed932a255b5f547f78fc5e7b05408707baaf25bf2607cab1db1563"
+    },
+    "native/reference/engine/render_vk/shaders/shadow.vert": {
+      "bytes": 519,
+      "sha256": "7623c806b5db263e1a054cc6fb52273a6fb413e1c9794e67945291b1e3d7e585"
+    },
+    "native/reference/engine/render_vk/shaders/ui.frag": {
+      "bytes": 464,
+      "sha256": "900f978786fa1037e5c682493750b75beae0c0a99a3f1d792e1aa24b1e3a1ff3"
+    },
+    "native/reference/engine/render_vk/shaders/ui.vert": {
+      "bytes": 597,
+      "sha256": "eb7b1352bd07f6f966962388d66d1481359936d113eacab86c355f72efef2f94"
+    },
+    "native/reference/engine/render_vk/src/fsr.cpp": {
+      "bytes": 10807,
+      "sha256": "e7ccaa2d98bee6e4c78c37bca969f3e936f99560ea6a750a088a0ca921b536b0"
+    },
+    "native/reference/engine/render_vk/src/fsr.h": {
+      "bytes": 2776,
+      "sha256": "3d15d762a0fe2e373016e18242b1fbb9b12be6b65662567032ad9b762070f8b9"
+    },
+    "native/reference/engine/render_vk/src/renderer.cpp": {
+      "bytes": 212733,
+      "sha256": "d673b38e6f5087df670b5442f330172c0665fd68e94b71b40e4e8b0508c22d68"
+    },
+    "native/reference/engine/render_vk/tests/test_vk_init.cpp": {
+      "bytes": 12345,
+      "sha256": "0374b9408d8a21672cd21f87b4bf12c4dae207e8b0e924520f2df2b0e3deb368"
+    },
+    "native/reference/engine/render_vk/tests/validation_levels.sh": {
+      "bytes": 2416,
+      "sha256": "26c5f29e92b29ebe0510507dead1545d7a5f4626948ab41475bd0ae3cee7b4b6"
+    },
+    "native/reference/tests/CMakeLists.txt": {
+      "bytes": 619,
+      "sha256": "1bf39615d879d54bb572a1bcf99b849daa929ae31aebb535fd64662177399163"
+    },
+    "native/reference/tests/test_actor.cpp": {
+      "bytes": 12128,
+      "sha256": "b30cc30b20409e3279f0b0f4f399dfb458d1ab3007d451a85848d88a6d1dd1f9"
+    },
+    "native/reference/tests/test_bze.cpp": {
+      "bytes": 6252,
+      "sha256": "935f82183841af3805af93b80283340a3e216387220a5415f5796482cfb2c5a9"
+    },
+    "native/reference/tests/test_levels.cpp": {
+      "bytes": 7541,
+      "sha256": "95fd0b7503fa57a4c67f620f7d292c151e374216fb702d22005409c0e0f427ec"
+    },
+    "native/reference/tests/test_lzss.cpp": {
+      "bytes": 3178,
+      "sha256": "3888db0e625ae003afd6ae0fbdafb293cb4928a2cc6b0f115591642216306684"
+    },
+    "native/reference/tests/test_mods.cpp": {
+      "bytes": 9892,
+      "sha256": "56cfffaeb239313276641272de1e22af404d20338e7d1e1d096c0e2dfe254c86"
+    },
+    "native/reference/tests/test_realdata.cpp": {
+      "bytes": 3918,
+      "sha256": "8fef7298c8c0c21f8e222a55eb1fbaf92b9a0351b3ab34681b57308e7362dbdd"
+    },
+    "native/reference/tests/test_tb_levels.cpp": {
+      "bytes": 8979,
+      "sha256": "d9f7d0e664eb580e62947bdbdc7fcd637d17fd8390ab473b5882f6f937da94c9"
+    },
+    "native/reference/tests/test_tim.cpp": {
+      "bytes": 3814,
+      "sha256": "509a4360570840425703171da74537e15b8c1372371f2400bab6c7560c8b39c8"
+    },
+    "native/reference/third_party/CMakeLists.txt": {
+      "bytes": 6754,
+      "sha256": "e113977098a12fd4ead589a1efb10c7ed995b844fc2997d8e9de36206a8e7783"
+    },
+    "native/reference/third_party/fidelityfx-sdk/LICENSE.txt": {
+      "bytes": 1136,
+      "sha256": "c93d509cd69d50698796c9c3274247352736ef122a3197ace2010f0978e21aa6"
+    },
+    "native/reference/third_party/fidelityfx-sdk/README.md": {
+      "bytes": 7298,
+      "sha256": "ba1c71b829a9c069842ea855dd926bbce8a6b48a2f390d54dd64a75b9c2bea9a"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_common_types.h": {
+      "bytes": 16722,
+      "sha256": "e12468e55bf9250206528158ebbdd765bb25f4400594b612a5872f3795218b20"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core.h": {
+      "bytes": 2602,
+      "sha256": "a74d716eaa129ee1de7c8477db1cd53be5f2b84c403c7881cf948f59c040e811"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_cpu.h": {
+      "bytes": 15740,
+      "sha256": "3d1566b5c245cde75c3d21682cc5cb6cdca321b9b50a66f433009ed6b2f31d2c"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_glsl.h": {
+      "bytes": 62293,
+      "sha256": "ca8bf66dfdf06a6fb910cebbdab35e14c16b80097d78067aebcd4df6f22c98bd"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_gpu_common.h": {
+      "bytes": 90460,
+      "sha256": "9745c7775c6d0948597662fcd16faed3652048a91aa8b137a083d32b3a72ff65"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_gpu_common_half.h": {
+      "bytes": 101300,
+      "sha256": "ec98c7c00d14273e1a76d321cccef07d62a71ccc4ae321a22aeb3d373de9de78"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_hlsl.h": {
+      "bytes": 62731,
+      "sha256": "fa40844d34099a94f2f796fb4f9538ce4543dc056bf002cebe924f4d17e695b8"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/ffx_core_portability.h": {
+      "bytes": 1728,
+      "sha256": "f3872ca489486887c1dcaa8d600058c4a2a39d858c082aac8c27076a02067fea"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation.h": {
+      "bytes": 10120,
+      "sha256": "0c4cb1c3df6388451ba379d81956851d6577f11b8cc106270abc1f36e612d7fa"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_callbacks_glsl.h": {
+      "bytes": 32481,
+      "sha256": "85b447c49df9e3337c1d3e2bc37fe6db9fe30d64b434067d18f16192a9a36a43"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_callbacks_hlsl.h": {
+      "bytes": 32730,
+      "sha256": "f2de0ba05839939c59427c2498be44252c33484af4f6051e4bd6831c0fe5ae32"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_common.h": {
+      "bytes": 16653,
+      "sha256": "eadced40b2eeee4ebcce472aef5dddf23fcc9b449de99a6e0440c938599e27dc"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h": {
+      "bytes": 4200,
+      "sha256": "8dd8e3f9ceda88aab5170b781ff83208f43902340175a639e0f11f83af4d18a0"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_compute_inpainting_pyramid.h": {
+      "bytes": 4182,
+      "sha256": "5961871905eb4324c0078af485910282d968baff405eb6575f6d600a4b93c9b5"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_debug_view.h": {
+      "bytes": 6315,
+      "sha256": "b67427bb0313f244e8e05b3dc2bf72ceddb33c2ea63ea08b841657f7b40de90d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_disocclusion_mask.h": {
+      "bytes": 7512,
+      "sha256": "b7371f13927de7fef5d68e084e5e958042b8f8616d3bd7c9ebea1c3eb9259232"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_game_motion_vector_field.h": {
+      "bytes": 6924,
+      "sha256": "00ef9b825459121eb14713f8b53fe547e6eb9a03e9d47879bac75273e9d2e263"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_inpainting.h": {
+      "bytes": 5432,
+      "sha256": "1a7e33a9268728d84739e1ec6ee03d4a606ffd2ff16b5fc08552a84bd2fef95f"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_optical_flow_vector_field.h": {
+      "bytes": 5427,
+      "sha256": "69be3f3b38cfc9b875d72f9a2bb2ca68e15c2e9650e333e8a76f0b0fcfcf170b"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_reconstruct_dilated_velocity_and_previous_depth.h": {
+      "bytes": 4906,
+      "sha256": "8dfc32ed9f994ff6fa419ddb779ae5937aa9ad3adb1fd6ff7bafc2ff642773d1"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_reconstruct_previous_depth.h": {
+      "bytes": 3065,
+      "sha256": "a9e8c92a1126078d4f0c5082387762e84e155a7be79f8f046e1f08bff328a2c1"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_resources.h": {
+      "bytes": 7347,
+      "sha256": "e3f75117ef65c0a9d9840b7d6114f8dbba54629f094980fff704d05c22688940"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/frameinterpolation/ffx_frameinterpolation_setup.h": {
+      "bytes": 2107,
+      "sha256": "e426ea052445b56b592439e9b3a5242002be0e4b49e7c3adc99f2241c69592dd"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr1/ffx_fsr1.h": {
+      "bytes": 67746,
+      "sha256": "d704764bcf165af648cd91f70cae1ad42e8511f34605e01a7ca742a642764a1f"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_accumulate.h": {
+      "bytes": 8938,
+      "sha256": "97f24f339e6e1e11850f508d134622105b9713593606d3dfa153198d66de3280"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h": {
+      "bytes": 28060,
+      "sha256": "03989bd6a083ea284d8472489812fbb03c085ed30ae68bab537a2836dc668ca2"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_hlsl.h": {
+      "bytes": 31695,
+      "sha256": "0927a2c3d2f45aa5f01a307fb46bcfcc565f87a2f090b76f41dae591325dfc93"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_common.h": {
+      "bytes": 13756,
+      "sha256": "6d1f9fc1d500ac69e60678aebd813f0d5c9ff5961a3505a905ff4104e98054db"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_debug_view.h": {
+      "bytes": 5888,
+      "sha256": "5a82c02d5e4546d5f736abece9522a0376fe38c0025b945b1beefbbabd6b1874"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_luma_instability.h": {
+      "bytes": 5437,
+      "sha256": "c45ba8cd473f4aea1ec21a4fd21f3a2aec840d3ca660ad074d6ba72b5acc204f"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_luma_pyramid.h": {
+      "bytes": 6380,
+      "sha256": "d1dac7cd4a773874127c9f676e67093fad5050a142dc0e0c6d81da46b392aba7"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_prepare_inputs.h": {
+      "bytes": 5992,
+      "sha256": "d63614ac2ecf6143565f2687cf3b9bd4404da91f6a7db1c9a573a83e5a20b170"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_prepare_reactivity.h": {
+      "bytes": 12746,
+      "sha256": "52010160c3e16d764f8115484866ee0155952d55cd1cc2bb20d835fc4ab90ad4"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_rcas.h": {
+      "bytes": 3880,
+      "sha256": "5afc1007f8ff70817d2c94bc5798b529379dad0d32e76264c35a2acd5c924ba8"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_reproject.h": {
+      "bytes": 3332,
+      "sha256": "937ccaed9d3101beaa97e4972a3cf117713ec3eea69b2eb68248cfba1f73b1e6"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_resources.h": {
+      "bytes": 7738,
+      "sha256": "818ed2d632014bb1cd500d0cb40b834eafa099c1c78aeb71630a3389ea419f85"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_sample.h": {
+      "bytes": 28628,
+      "sha256": "28a78343311494fadaaceb0a4cb12301cfb4b9ae364946c5f51b7845c5145d87"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_shading_change.h": {
+      "bytes": 2776,
+      "sha256": "3ff603390eeb4e7b29a9fd3126c958a8644c691701b0a8ca0c7cd016a25bbc76"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_shading_change_pyramid.h": {
+      "bytes": 9764,
+      "sha256": "3734c400f49f69c47af47df2ee541f719eaafc4d83a9f87beb359ea82b94de11"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_upsample.h": {
+      "bytes": 29131,
+      "sha256": "bcc27f8d98bb44543860d391a26b29af8e7d7df5cc72ad2299bc77d2bae96a43"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_callbacks_glsl.h": {
+      "bytes": 23324,
+      "sha256": "5391ce93307595f1bd98aab619a1d23dd316c0e7e4f01edbfbf95c54ac8bf4e2"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_callbacks_hlsl.h": {
+      "bytes": 26442,
+      "sha256": "68f015d36ce78a030acd029dcc6b5c7dcf0ef436b8db77192f33c0fc4f87141d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_common.h": {
+      "bytes": 3548,
+      "sha256": "09aa9d6b0b089577fb6d0cab44b0f75ca4cee0e112314fb3b66a1146c4f716cc"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_compute_luminance_pyramid.h": {
+      "bytes": 3353,
+      "sha256": "2a90b54dd0a8b605b833f27819d20b761abcc287592af370682ebe1550fb6768"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_compute_optical_flow_v5.h": {
+      "bytes": 11166,
+      "sha256": "642a93f8de16223e5ba0a9d604d60e7f0febfbd95d2259df3cee65c846eeb050"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_compute_scd_divergence.h": {
+      "bytes": 7034,
+      "sha256": "2dc7c3ea419cf050d7331ad9ae9fe3ba669d405e127d526421e99e0c6f24ed92"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_filter_optical_flow_v5.h": {
+      "bytes": 2180,
+      "sha256": "447777699319888b3b1f448fd8efadc150c11a1c175540c448cb4b2710b96d3c"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_generate_scd_histogram.h": {
+      "bytes": 3744,
+      "sha256": "152f27d814f0529e5fd77fc427afcfa0649d9e5a52427b89b298f2dd8daea879"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_prepare_luma.h": {
+      "bytes": 4083,
+      "sha256": "6d1498c92b68118cce0eefc59aba48e458d70b538e7fc75c00efc310a71e0815"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_resources.h": {
+      "bytes": 3678,
+      "sha256": "7295269424e5baf7e660c3c259be49ed1be91053b65d6f495207e95bfe21b7ee"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/opticalflow/ffx_opticalflow_scale_optical_flow_advanced_v5.h": {
+      "bytes": 3697,
+      "sha256": "80bc46b6e9b2942974361b034b90460441a08023f62fd086f16381dd681faa55"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/gpu/spd/ffx_spd.h": {
+      "bytes": 43628,
+      "sha256": "e40a48d2fc8a26017f37595bd74f76021dc6edd121804d6fbe08aa1b0819a718"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/backends/vk/ffx_vk.h": {
+      "bytes": 19094,
+      "sha256": "4a6a011ad51f3ee01687344e784fa2b32c54cbc570d50f67bb37eb762edf52f6"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_assert.h": {
+      "bytes": 5473,
+      "sha256": "e11887d384b1a52ea58f46262b3e6cbf8d41d57392ddfe7b9c267af35b28d4ca"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_error.h": {
+      "bytes": 4346,
+      "sha256": "64388f52d8a272d411793b5429aeefaf8bf32f65e63494e7c297d0fcae68195d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_frameinterpolation.h": {
+      "bytes": 20814,
+      "sha256": "f5e8e593c59a6d0c356c459bef0d7a6f27d56fa1aaf85f2b28e1c37317f566f3"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_fsr3upscaler.h": {
+      "bytes": 37894,
+      "sha256": "4021123545ee70ad98a97f242d7228528e75f7974957972af8baddcb01659f37"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_interface.h": {
+      "bytes": 34136,
+      "sha256": "c27defdec85a1c43b549efa701d191c084bd099185a2354ac78fd1bd296e56d7"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_message.h": {
+      "bytes": 2353,
+      "sha256": "11a858f780c7d9066a8f10b4e669a0a67064860f45dc707b915e8cf6bab05661"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_opticalflow.h": {
+      "bytes": 9720,
+      "sha256": "e3e8d2740dc1da37ad4d5521f4aca00bf10c34bb8f7c3988e0dd67fd14f2f3c4"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_types.h": {
+      "bytes": 63071,
+      "sha256": "b314fbcfeb7b59564d9c2e66ffd5dbc4e47fb2a20ad4cca613fb945a08be9ae0"
+    },
+    "native/reference/third_party/fidelityfx-sdk/include/FidelityFX/host/ffx_util.h": {
+      "bytes": 6246,
+      "sha256": "3cf11cb69ebbc4887170b870ea9421c32b16afd3fd2b05e2f603f2c48399c6c9"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/shared/ffx_shader_blobs.h": {
+      "bytes": 1852,
+      "sha256": "6377e6c61446cb9672385c441a8cdd06f7676d6ada8490b18e1624f599df7d12"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/ffx_vk.cpp": {
+      "bytes": 238971,
+      "sha256": "5748e8079883f9445e46921429aad92752f2e57bbdbcd6003f2f93ec7af210dd"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid_pass.glsl": {
+      "bytes": 4155,
+      "sha256": "5aaa20af8dbdee7ce32a178bc1f5cf16eebe224dc1619f8084bc97d0fa0c87ac"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_compute_inpainting_pyramid_pass.glsl": {
+      "bytes": 3902,
+      "sha256": "0f27e911d822f40648c919bfe16d3787cf0ce7885d13e0ddc9939da939a711a0"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_debug_view_pass.glsl": {
+      "bytes": 3487,
+      "sha256": "ff9ed10f19f5a9f11ad1f70bf1647793974bfed0ddf36dc3a212765ff6bafaa1"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_disocclusion_mask_pass.glsl": {
+      "bytes": 3240,
+      "sha256": "9e2446780ff1af7f2686f6a8cce11c72a75dfc2d488f9cea93df8ff060cc0f24"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_game_motion_vector_field_pass.glsl": {
+      "bytes": 3160,
+      "sha256": "2149720bf55cc83c716c867e948a9c2c6080caf349bc6ad41636362e6a12da76"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_inpainting_pass.glsl": {
+      "bytes": 3072,
+      "sha256": "0fea03930deca453d01349fbf5a8b355464de1a5b484f327627e141e58fa98b7"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_optical_flow_vector_field_pass.glsl": {
+      "bytes": 3171,
+      "sha256": "479516d54dac7a6bbac6ea9ba57d4d4826cf96f2aeb14ffde88f44cb2807355d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_pass.glsl": {
+      "bytes": 3773,
+      "sha256": "9158171ef21419c0d7ffc8b86fdf5665471220327523bd74e9fa9fdb0190bd53"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_reconstruct_and_dilate_pass.glsl": {
+      "bytes": 2970,
+      "sha256": "991235375ce69fa34f6eb3e5e38f615f668300acdea9e4afdd94e9a66afc2312"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_reconstruct_previous_depth_pass.glsl": {
+      "bytes": 3001,
+      "sha256": "5504bfcdddf51a46ed5eeae7f4e4b50122828ff98a7576e5f583a356645c4cdb"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/frameinterpolation/ffx_frameinterpolation_setup_pass.glsl": {
+      "bytes": 3154,
+      "sha256": "55106cbf025b2c58ea65d8eccc34bf4310bbbf39915b6faa2878101ddf3eae98"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_accumulate_pass.glsl": {
+      "bytes": 3667,
+      "sha256": "f551f709c59adb3f41441938ee6d8921b1649a4d1eefcff600f3995896c8ae7f"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_autogen_reactive_pass.glsl": {
+      "bytes": 4171,
+      "sha256": "9db80cb7bce6605e770a12e938fbf8f7d4ffe60faebd2325f27355bea075760d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_debug_view_pass.glsl": {
+      "bytes": 2837,
+      "sha256": "977f97707f02852f763c578b4cb38a8cf1697e21410fb138209732342e24f2f6"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_luma_instability_pass.glsl": {
+      "bytes": 3054,
+      "sha256": "e6351bb08531980a54097507f9729f3ee70a440e29e661c3ce4a2a69f7a02dc9"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_luma_pyramid_pass.glsl": {
+      "bytes": 3205,
+      "sha256": "6312d1abcea30b1618a9875fa14a6ddffef2a7ec18291ac5c302787a040a13ca"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_prepare_inputs_pass.glsl": {
+      "bytes": 3023,
+      "sha256": "0d2a32594ae940bad84aa95e037f41db0fa8bb4c11a0156c11c1e4415d81ec9d"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_prepare_reactivity_pass.glsl": {
+      "bytes": 3386,
+      "sha256": "e7c7f383f5da9a99e0daf5009c5a2729382eb2bea90472daaa9482437114d562"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_rcas_pass.glsl": {
+      "bytes": 2743,
+      "sha256": "c9d252840709f99debbd24078951d23cf78d0c52480f86ed22b1d85e1ddd3496"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_shading_change_pass.glsl": {
+      "bytes": 2561,
+      "sha256": "79edde3239b1d9c46a645fbc2239c7b6db3b7dbf909768781c3f7406c48b24bc"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/fsr3upscaler/ffx_fsr3upscaler_shading_change_pyramid_pass.glsl": {
+      "bytes": 3305,
+      "sha256": "cf069e6c99135dbf51ddff38e46e5db5ec19abb5e286635be3ec702dbd68fede"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_compute_luminance_pyramid_pass.glsl": {
+      "bytes": 3012,
+      "sha256": "b1ff4093d9c362a4e5dcbd6d2b6a660c862e6697edc483b030925d96164d5e7a"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_compute_optical_flow_advanced_pass_v5.glsl": {
+      "bytes": 3001,
+      "sha256": "3a421325ddba2dc3bd6974bf6fbc988cff54a83d08ae22561aec6a7a2352fbaf"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_compute_scd_divergence_pass.glsl": {
+      "bytes": 2951,
+      "sha256": "6416bd33ebc01d78196990a766c92173d4f3827d63000ef4dfe5892df7a8e375"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_filter_optical_flow_pass_v5.glsl": {
+      "bytes": 2668,
+      "sha256": "5648f8c65e4e8d6384304383a2959bd321916e9e8bd86275cb0daad486d24951"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_generate_scd_histogram_pass.glsl": {
+      "bytes": 2785,
+      "sha256": "d38e40bf12cce0965714b9f06140109b22ea3cdecf59c4b64b725e7e5ee0252e"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_prepare_luma_pass.glsl": {
+      "bytes": 2551,
+      "sha256": "f1e06c9440c4bd24136c2d88f158e6faaddf27f083b6c31b61cc5c39537597ed"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/backends/vk/shaders/opticalflow/ffx_opticalflow_scale_optical_flow_advanced_pass_v5.glsl": {
+      "bytes": 2918,
+      "sha256": "6735219874896c8dc42d2c05f4f77b7749e31abf18e254dfe34939ad0c802f6b"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/frameinterpolation/ffx_frameinterpolation.cpp": {
+      "bytes": 83768,
+      "sha256": "60909dde89bca4ab74251261d8f42ae6c3e6067566500826dee0878d2c72cbd1"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/frameinterpolation/ffx_frameinterpolation_private.h": {
+      "bytes": 6370,
+      "sha256": "789c572ad480867c8c957e447df25544b666c48e7934010295d5f911e73cc82a"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/fsr3upscaler/ffx_fsr3upscaler.cpp": {
+      "bytes": 93902,
+      "sha256": "fb7f51848212d75d4f2b36a2fe9e4540a9007b9c01ccf23e82fb70cda02878e0"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/fsr3upscaler/ffx_fsr3upscaler_private.h": {
+      "bytes": 6512,
+      "sha256": "c40edf113ceed5a32fce1383c22773dc9e3aa019d16e609437764c520a43d6e3"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/opticalflow/ffx_opticalflow.cpp": {
+      "bytes": 68600,
+      "sha256": "7a7419997e58c3ed602952eb1b32bb642e67aa5f0ec4a9117b437eac0ad32e95"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/components/opticalflow/ffx_opticalflow_private.h": {
+      "bytes": 4576,
+      "sha256": "5bc8b9b483b6a8b1cd390f5a0322f5c4cee970370697953019050e64a0b0a4c3"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_assert.cpp": {
+      "bytes": 2753,
+      "sha256": "f663a61a3525adddcb6d4bf93bc12bbeca0901afe893c24a26beca15e2254303"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_breadcrumbs_list.cpp": {
+      "bytes": 1933,
+      "sha256": "6397e3e1ab6554e6d39f961c438b56bbd0293eb58119f5537d5ad41b4d5f855a"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_breadcrumbs_list.h": {
+      "bytes": 9784,
+      "sha256": "3db63e6bb0ed6ca69c5c951ee1f4e892604b1279c9c003d912bd236876817e06"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_message.cpp": {
+      "bytes": 2351,
+      "sha256": "a80e6193e3a05c0bc87429a43341387d1ff84a3eaf1eafc2399f5273177e14cf"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_object_management.cpp": {
+      "bytes": 2219,
+      "sha256": "a1669bf70b02d2749c3f1fc7f9038cda2b2474d0b25d87df744f5c7b4008b4e8"
+    },
+    "native/reference/third_party/fidelityfx-sdk/src/shared/ffx_object_management.h": {
+      "bytes": 1830,
+      "sha256": "2a8cf4b4d7f4880cfe3c1186da25ffb625f04a6bdbd2d97b5757a33ab3629cb8"
+    },
+    "native/reference/third_party/fidelityfx-sdk/yami/FidelityFX/host/ffx_types.h": {
+      "bytes": 489,
+      "sha256": "1cceb54290e352fa0a3ae9a5562c4141086abedb084a55c5aa457b64fbf96c69"
+    },
+    "native/reference/third_party/fidelityfx-sdk/yami/ffx_compat.h": {
+      "bytes": 4019,
+      "sha256": "b8ec7976833cba1aa64cd3b73c809e2278203d757d79677415e6b1830b4cd768"
+    },
+    "native/reference/third_party/fidelityfx-sdk/yami/yami_ffx_vulkan.cpp": {
+      "bytes": 2236,
+      "sha256": "b298854fd30a8f25ba567239c7d632d9865cd9db7ccb913dcdbe156fd3c9c52a"
+    },
+    "native/reference/third_party/fidelityfx-sdk/yami/yami_ffx_vulkan.h": {
+      "bytes": 1115,
+      "sha256": "f1dc2d039d9ad22cdb72e45dde03d05c036430ca175e34f95b6cb2c2273b41c4"
+    },
+    "native/reference/third_party/stb/LICENSE": {
+      "bytes": 2769,
+      "sha256": "111f310c46505a56fbe6e2ec9093123ddac13b7b2af37d420aebe68dc2f44db1"
+    },
+    "native/reference/third_party/stb/stb_image.h": {
+      "bytes": 290998,
+      "sha256": "1f8c1b6b408f26e3b20cbfbbd4758afb3dc9b837ff1e17c258928f406148a87c"
+    },
+    "native/reference/third_party/stb/stb_image_write.h": {
+      "bytes": 72945,
+      "sha256": "17f339e7582ff4d4d56e40b0e87d77eda8d8f8e62806278ddf8fcf0b8b3d9a84"
+    },
+    "native/reference/third_party/stb/stb_impl.c": {
+      "bytes": 356,
+      "sha256": "d9438a4f283e68a3501ba469ed28323355068d5b4cf9f6e4f13b991e0bf02ac0"
+    },
+    "native/reference/third_party/stb/stb_vorbis.c": {
+      "bytes": 198374,
+      "sha256": "c8daf8d9f0dad818a1cb6c9194eeb4503b63b8cbf8c744efc12942f3d679f686"
+    },
+    "native/reference/tools/CMakeLists.txt": {
+      "bytes": 466,
+      "sha256": "8aa3148f5d5362d880a0dd2e102aa9ef465feecf34c0d42db19b7aa4be3bda31"
+    },
+    "native/reference/tools/bbimport.cpp": {
+      "bytes": 1977,
+      "sha256": "f197ef1bf6e1a959477c9b2ff2db04466aab91b9cb4ae4b56d1a33708731bcc6"
+    },
+    "native/reference/tools/bzedump.cpp": {
+      "bytes": 4528,
+      "sha256": "803673a5865caefdcf7d5573bb24f21f91b7b4ac028c354833fd52d2be22509d"
+    },
+    "native/reference/tools/embed_fsr_shaders.py": {
+      "bytes": 17454,
+      "sha256": "68c0a9166dab827c07d02974a4045bea4192031bacf17454f0ccb7efb43b25b1"
+    },
+    "native/reference/tools/ghidra/CreateFunctionsFromDataPointers.java": {
+      "bytes": 2737,
+      "sha256": "cdcd938c77500cf0e88e684a0f3c079de144c7f9ffc0931e12c6b20cd40611d1"
+    },
+    "native/reference/tools/ghidra/DecompileAll.java": {
+      "bytes": 1824,
+      "sha256": "f14249d7d3e52c0278cac09403840cb0224a1803691b73f1272046031fc4286a"
+    },
+    "native/reference/tools/ghidra/ExportFunctionFeatures.java": {
+      "bytes": 4290,
+      "sha256": "e38a8dd492d4488ca2666c612d8dcc2f01bd2777a75c5ce6e3cfcf10e81b7325"
+    },
+    "native/reference/tools/ghidra/LabelGLPointers.java": {
+      "bytes": 3550,
+      "sha256": "f4e9001df4587cbb1d87555fee0d9854fe360f0b273ffe486379cb05cd15b09a"
+    },
+    "native/reference/tools/ghidra/align_logic_tables.py": {
+      "bytes": 2791,
+      "sha256": "871e0cf0353961e9bf9fc426b127486e89a3239df29e5285501c21d97f68cf93"
+    },
+    "native/reference/tools/ghidra/match_functions.py": {
+      "bytes": 5670,
+      "sha256": "181807ac42a4d95fddef01be8e0cf4b46dac08891a9750185e10c6d770ac48fa"
+    },
+    "native/reference/tools/modkit.cpp": {
+      "bytes": 9439,
+      "sha256": "e489c6bc29e4cadac6defd1e846e51982dd037cae72255dd2215e4e24a55ee46"
+    },
+    "native/reference/tools/psx/driver.lua": {
+      "bytes": 6487,
+      "sha256": "07d1f9f47d678fc271f8366e642b79fdfea95ce5485005ffd2eb42e7d8826e32"
+    },
+    "native/reference/tools/psx/run.sh": {
+      "bytes": 2076,
+      "sha256": "49dc9064f71b406fee01c342b3fd7a3ecc42a6a49111da40e588886f69d98ca4"
+    },
+    "native/reference/tools/psx/syms_lit.txt": {
+      "bytes": 1168,
+      "sha256": "a12f19c54b80d72c46fe086ccc6acc1c3f6d93e0a319c229c19c0044ee6c845a"
+    },
+    "native/reference/tools/psx/syms_tb.txt": {
+      "bytes": 886,
+      "sha256": "4916df13db5b96d7e7a1fda26b4418e699dee5720cc2970da9dc504c22608d82"
+    },
+    "native/reference/tools/re/anim.py": {
+      "bytes": 15136,
+      "sha256": "d74a8b52d820aff1bd1579950684ada3d8eb0582e0a03d7e4e70afd78008fcd0"
+    },
+    "native/reference/tools/re/bze.py": {
+      "bytes": 4512,
+      "sha256": "f8e85081547a45306f479cc12151a84af6605cc6fcc5919dfd6a09ce1c47d2c4"
+    },
+    "native/reference/tools/re/entities.py": {
+      "bytes": 10314,
+      "sha256": "c8d293dc3491401715cb09f5e63afee5de637b027245e8720bc68ddd6b86f93e"
+    },
+    "native/reference/tools/re/export_level.py": {
+      "bytes": 11684,
+      "sha256": "65b6cd01d7bb07f2bb813af42989ad1d840937fb616a59ad847d3861f23898c5"
+    },
+    "native/reference/tools/re/ground.py": {
+      "bytes": 13818,
+      "sha256": "20030798e93075e99daa092d35926f92e3225d4988f8f5e6d3fde0fffcbf77c3"
+    },
+    "native/reference/tools/re/motion_check.py": {
+      "bytes": 3714,
+      "sha256": "bd05a705a7f20e7a1e5e5b5e7e5441bcd7382618c1afdbbb250cac481ddfc678"
+    },
+    "native/reference/tools/re/player_states.py": {
+      "bytes": 4946,
+      "sha256": "60096ee0da763ad0577d874356328345b253e42b750043127ce79f7ca53414ef"
+    },
+    "native/reference/tools/re/render_top.py": {
+      "bytes": 4162,
+      "sha256": "5b415f7418f9990e02f966ecd8f3a55f1d62f5b3f96d2e918cd6fef2185daf48"
+    },
+    "native/reference/tools/re/sec1.py": {
+      "bytes": 2650,
+      "sha256": "13e2b9c2a10b6e473d3550d5eebb5fc477016d26bbdc2725ab4412e54a4bc9cc"
+    },
+    "native/reference/tools/re/tb_anim.py": {
+      "bytes": 22846,
+      "sha256": "f395cc5b49a50e6a2700cddc2d4844e3bb9b2ccc59fb14eaeaf83be5e81a91e7"
+    },
+    "native/reference/tools/re/tb_ground.py": {
+      "bytes": 17460,
+      "sha256": "761a99e0069d3fb135931eec2c87ea16f58bda0b8bf0bb6906f61438bee96a97"
+    },
+    "native/reference/tools/re/tb_moves.py": {
+      "bytes": 11832,
+      "sha256": "80b746bb27eda03052635c44245df596a847ba76141580eae82af79ce207badf"
+    },
+    "native/reference/tools/re/tb_music.py": {
+      "bytes": 2727,
+      "sha256": "b6983e55db6544c212201de9dd5cd9db3ce7df87e00991b225ef03b7ed68a834"
+    },
+    "native/reference/tools/re/tb_players.py": {
+      "bytes": 4649,
+      "sha256": "7bc3989c100b01f4995eca3bf0c12ca1a5b66a9b2074472214b77ec01fb1cd05"
+    },
+    "native/reference/tools/re/tb_sec1.py": {
+      "bytes": 6225,
+      "sha256": "37db4993a2ada0d06f4ece7311593f9d44fe7e83afd78f00eaa61f0dd15a4125"
+    },
+    "native/reference/tools/re/tb_shapes_fuzz.py": {
+      "bytes": 20806,
+      "sha256": "65cfd541b5280218e562adc2d138f562c976cfe66295707266bcd99e8f7faff7"
+    },
+    "native/reference/tools/re/tb_switches.py": {
+      "bytes": 1946,
+      "sha256": "79d3b52e51c65a471e17f944aebbdce2bfa1b3c48ca0aa66f247abf4296d10de"
+    },
+    "native/reference/tools/re/tb_world.py": {
+      "bytes": 13063,
+      "sha256": "6b9ae840b37167621d1e2f62ca6f6ca76e1651cb53a3327924121f98ae7c9434"
+    },
+    "native/reference/tools/re/texgap.py": {
+      "bytes": 7398,
+      "sha256": "2d50a9c5f1f141ce7ced2333463a8350b674c7ffa49e6afe127769c3682d1f57"
+    },
+    "native/reference/tools/re/tmd.py": {
+      "bytes": 2252,
+      "sha256": "85404bba4c86e407f8a2ae7eb40d5d8d8db958db2be9d6925f6517df37f5d0c6"
+    },
+    "native/reference/tools/re/verify_exe.py": {
+      "bytes": 5763,
+      "sha256": "f11e39971f19f255fc08b88b8e025408004c0b8679a32646785bfeb1ccc3dbc6"
+    },
+    "native/reference/tools/re/xa2wav.py": {
+      "bytes": 2581,
+      "sha256": "3f98550c0106fd83faedb5587df2a1ad7b7ff1a9586d2cb6f9c6ce0c72abcb4c"
+    },
+    "native/reference/tools/release/appimage/Dockerfile": {
+      "bytes": 1805,
+      "sha256": "a9109621b5cc39758390a383f9287e09949713df6fbc60bb681ee7b51b506167"
+    },
+    "native/reference/tools/release/appimage/bbtime.desktop": {
+      "bytes": 294,
+      "sha256": "1cb8ff6046e0d14745d92e79e19a3aa67ec637af0112ee77fb3b411ccc2adee2"
+    },
+    "native/reference/tools/release/appimage/bbtime.svg": {
+      "bytes": 946,
+      "sha256": "d5599791a333e5850c994995626a6c8d1f0597f3711764b496dbd2c4d6f98db0"
+    },
+    "native/reference/tools/release/bbtime-update.pub": {
+      "bytes": 46,
+      "sha256": "e6c9c9eb5fbe5165f2bb842b7efec7270c6796fbbc48acba6442126930050224"
+    },
+    "native/reference/tools/release/build_appimage.sh": {
+      "bytes": 3111,
+      "sha256": "0dca1835640a63c2a526861ab39314474e054f18239d2d3260510811b963c21d"
+    },
+    "native/reference/tools/release/keygen.py": {
+      "bytes": 1634,
+      "sha256": "5c739a240a723c6c0d4cfeb8a5670952cc15fbdd704e60fcb55a11ccc66be8c6"
+    },
+    "native/reference/tools/release/make_manifest.py": {
+      "bytes": 2261,
+      "sha256": "132e94bc0a4f4ca59377482ff9e17553098afee2c9c45f2a6f43b264b35e6e72"
+    },
+    "native/reference/tools/release/sign_manifest.py": {
+      "bytes": 2060,
+      "sha256": "26b598961ef9a81bd56c75c053f1b890845b1e438ac3982cb621876e532d2121"
+    },
+    "native/reference/tools/wine/cam.py": {
+      "bytes": 1574,
+      "sha256": "c4aaca7d76cc606748ad2608e3c4e618ad006f7af693d9edf601a206e49ec0d6"
+    },
+    "native/reference/tools/wine/compare.py": {
+      "bytes": 2407,
+      "sha256": "1a353f25723691b86e3d5dcfe68afd83689fd612a8aa7dc26500e124adca4872"
+    },
+    "native/reference/tools/wine/env.sh": {
+      "bytes": 1011,
+      "sha256": "3d2b162f4bd40e39e3b695fea07061b4bda3faf97f3528e61afd7a2728b1e795"
+    },
+    "native/reference/tools/wine/memsrv.py": {
+      "bytes": 3555,
+      "sha256": "b99abbec56bd6e650d84d3a63eaf084faf9529a17d3c6b19b2852df8fd89b97a"
+    },
+    "native/reference/tools/wine/peek.py": {
+      "bytes": 3187,
+      "sha256": "7a120d4cd0ae957e3174aa660d6facc5d9e742f06917b712cbbeb8efc52f9846"
+    },
+    "native/reference/tools/wine/run_original.sh": {
+      "bytes": 3590,
+      "sha256": "b227d831b2fdce07d4507ec897bd8fc7e0401d4f12d5b1a74b92b661d4b84e3c"
+    },
+    "native/reference/tools/wine/send_keys.sh": {
+      "bytes": 1575,
+      "sha256": "c94b1daae641bd26143d83a7e1f94d0bd4c5129efbf2db8c12a07754f99b88df"
+    },
+    "native/reference/tools/wine/setup_prefix.sh": {
+      "bytes": 2887,
+      "sha256": "c17ad500ee896648cc1a279ca0060c0857b0dc2286072e58de5b38c7b513a1b4"
+    },
+    "native/reference/tools/wine/shot.sh": {
+      "bytes": 741,
+      "sha256": "8de0fc5b9c977883dc1d8551d16077eddda90d374a7ed1846c3e53b7a8736c05"
+    },
+    "native/reference/tools/wine/trace.py": {
+      "bytes": 2325,
+      "sha256": "aef4400a696e94a9ee32fd91c94ff8ea769cf8d11cc433d2ec069ce95a6f6f79"
+    },
+    "native/sdk/LICENSE.MIT": {
+      "bytes": 1093,
+      "sha256": "26a5b210d90760156ce886267ce9df235787dcc6cebfd7ecd95ef5b6fdcc95bf"
+    },
+    "native/sdk/deps/nlohmann/LICENSE.MIT": {
+      "bytes": 1076,
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    },
+    "native/sdk/deps/nlohmann/json.hpp": {
+      "bytes": 953436,
+      "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+    },
+    "native/sdk/generated/include/gdextension_interface.h": {
+      "bytes": 145569,
+      "sha256": "625245dba4c08f346e96e6d7e413b83bca6e94915b514887d1dad4b29c03bfab"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/audio_frame.hpp": {
+      "bytes": 2514,
+      "sha256": "2de72e48ab5d4d11ffbbb77e0064f394225840c7f39296b6edbd0c147bbcbf80"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/caret_info.hpp": {
+      "bytes": 2663,
+      "sha256": "2dca72e6fce429333d8a8d8670eee34cc02933b18365adf9a06984521acf9712"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/class_db_singleton.hpp": {
+      "bytes": 12903,
+      "sha256": "e0380160a0cd190f42563684983957f6df945e5c72f224d0f5b09c41e2e8a987"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/file_access.hpp": {
+      "bytes": 7755,
+      "sha256": "c37da7e62132dd935e33f3cacf9a3ab8d75536462522f0eeb219692b42e6a44a"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/global_constants.hpp": {
+      "bytes": 14883,
+      "sha256": "829008dfced6d729dab5c03dbfa9e36f3d8b5036a23d3af245dc79703086d33e"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/global_constants_binds.hpp": {
+      "bytes": 3105,
+      "sha256": "12df51b5015d84d63b2eab1675334e2d5cfe521dc1275979a318dc761767bb5d"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/glyph.hpp": {
+      "bytes": 2735,
+      "sha256": "1ae9f96bae049789b54c863dc6f331508cf092c1dd375c4e01b85925c4799bb1"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/image.hpp": {
+      "bytes": 10057,
+      "sha256": "5224fa32b96f789bb792c83defab4dbbca709f32cdd109a4f9166e69791830e2"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/object.hpp": {
+      "bytes": 7917,
+      "sha256": "1bd38e036e9a166b9f468b4ea946dfe6c9f17321355495c02c37d9e386a6274a"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/os.hpp": {
+      "bytes": 8092,
+      "sha256": "439b05d65b9aa44a32fbcecb437e134a20c712917be3fbb3d3c219c70b5724dc"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server2d_extension_motion_result.hpp": {
+      "bytes": 2885,
+      "sha256": "6bf68a26120f5840cefbb7e659ce43f5f3da76857983681b5edbb2888bb291ab"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server2d_extension_ray_result.hpp": {
+      "bytes": 2713,
+      "sha256": "75636017eeeeeb3f0193713a4f26ac8cb785b6c64198691f7133b27032b9a44d"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server2d_extension_shape_rest_info.hpp": {
+      "bytes": 2687,
+      "sha256": "4792c5a3eb54ed1e77ff52e13bf1196f535e212badaddd324820380b04502308"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server2d_extension_shape_result.hpp": {
+      "bytes": 2679,
+      "sha256": "e743d9c140de11c122eaeef037f524f927c4292c377a0bb591966d29e4f84d41"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server3d_extension_motion_collision.hpp": {
+      "bytes": 2782,
+      "sha256": "6c1dce1f7743b576af4a15bb16d162c27dc6500907b15ac96dd0e81ca75cde26"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server3d_extension_motion_result.hpp": {
+      "bytes": 2831,
+      "sha256": "ae0fbdf9977c8be852b0232ea7a282d8644ce14af96996b5a04436d7c0abfa88"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server3d_extension_ray_result.hpp": {
+      "bytes": 2731,
+      "sha256": "9060831d2f47f4b9591e083d72728627e99eb804840c9576ac0d7005db889d89"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server3d_extension_shape_rest_info.hpp": {
+      "bytes": 2687,
+      "sha256": "d763132d33d070ebac74d68b5c09dd230015b4b480f3b094485fcd695e0f3e1b"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/physics_server3d_extension_shape_result.hpp": {
+      "bytes": 2679,
+      "sha256": "7f3be9b7087fe187eb55e2f6504a1ce3b9bd8dcc757ab6e13ac8d74f92847aeb"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/ref_counted.hpp": {
+      "bytes": 2815,
+      "sha256": "8f0e0ff1c576fde01e60e9eb61efbee88f4fd07a13417d54a902a6b54b11b181"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/resource.hpp": {
+      "bytes": 4777,
+      "sha256": "9c08ce6f0b20299ec3350d3b153b714a459b8f1a7338aadd16a9c53c526ca436"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/script_language_extension_profiling_info.hpp": {
+      "bytes": 2675,
+      "sha256": "677d7f2babf0083ef2b3a82becb93eca35000ddd8773455dccc1ca2f740dbff2"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/worker_thread_pool.hpp": {
+      "bytes": 4024,
+      "sha256": "34a059d873c6dfd195cf63c88e0bb09e543deab357c9fab1918189b601feb160"
+    },
+    "native/sdk/generated/include/godot_cpp/classes/xml_parser.hpp": {
+      "bytes": 3849,
+      "sha256": "e03d822012be09b727db6466dfffeda9699531ced47c236b74e0213cc0bdedab"
+    },
+    "native/sdk/generated/include/godot_cpp/core/ext_wrappers.gen.inc": {
+      "bytes": 11573,
+      "sha256": "a6b3086127b60de43bf5396fddac4d274c3c15fe7bdbcf3ad89f0ac4de048a0f"
+    },
+    "native/sdk/generated/include/godot_cpp/core/gdextension_interface_loader.hpp": {
+      "bytes": 19599,
+      "sha256": "5518ed69a2bd26f10fbf31ebfa8ae15fec59f5a59647af238259c4f404cab1e0"
+    },
+    "native/sdk/generated/include/godot_cpp/core/gdvirtual.gen.inc": {
+      "bytes": 280270,
+      "sha256": "ee45264fbacc90ded8036814334c761e6168fe01e42a6d35f42ae7bd17172ba1"
+    },
+    "native/sdk/generated/include/godot_cpp/core/version.hpp": {
+      "bytes": 2502,
+      "sha256": "f4f8c126d31858bd2b535978c3720a025584f2bc8846dd24dec453c8cd6f8ce5"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/array.hpp": {
+      "bytes": 12392,
+      "sha256": "6a686eb5875594fd51466e124cd33fc2a1c90311fb02adf69d5cc342eb5336fb"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/builtin_binds.hpp": {
+      "bytes": 2633,
+      "sha256": "460ed733dd11d00c93c239b11b79718f6b98b35fa7ac5f17d28020ac9e2aff4b"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/builtin_types.hpp": {
+      "bytes": 3885,
+      "sha256": "303bf92a10e2258a6fda9e1d80925e1538d210fdaefd916f4a082c0bc5f5dae3"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/builtin_vararg_methods.hpp": {
+      "bytes": 5301,
+      "sha256": "0620755a9b72c408794437a9b01039849612493e2c42d2615899ad50fab07972"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/callable.hpp": {
+      "bytes": 6339,
+      "sha256": "09d468430ea79ce132aaf8724ed45a5e484db789130127b666576b7cad3b54e3"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/dictionary.hpp": {
+      "bytes": 8134,
+      "sha256": "200ec11102da6d4c0ad18d4bf60cb78a6beef1e96b33c0588e11c4f3e82b4971"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/node_path.hpp": {
+      "bytes": 5298,
+      "sha256": "b789672b0b29ddaabf54c4762e13fe424c2c13dc6168cc7bf66aa34e1cae3226"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_byte_array.hpp": {
+      "bytes": 13976,
+      "sha256": "9d0693541be7a007242ac4b21721e1d12d67202305d7481fbf02efd225cd8eb2"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_color_array.hpp": {
+      "bytes": 8792,
+      "sha256": "f230e2f366e920fb70bc09294c3b79a828d803f9251e2184aa08ff054c060c2d"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_float32_array.hpp": {
+      "bytes": 8724,
+      "sha256": "bf6572a67a251bf6f6658ce084b26824451e3012b1f717382f32f96d9730a4ec"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_float64_array.hpp": {
+      "bytes": 8738,
+      "sha256": "c693b76ccaa470863063ad2fa5434229e9022787e47dad96d2250c061234d0e5"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_int32_array.hpp": {
+      "bytes": 8710,
+      "sha256": "d29fe37c95aec98c494945263e4fe673eea63eb516db543794cab183586a4693"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_int64_array.hpp": {
+      "bytes": 8710,
+      "sha256": "ee6db0774c10751d853f644eab6cbd87797a0c74bc482dc52f6bd08c2cd50189"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_string_array.hpp": {
+      "bytes": 8846,
+      "sha256": "c4039e037e27e00b3f5c791feea6597024d09dd810ad22287b36dcfdd6a78a9b"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_vector2_array.hpp": {
+      "bytes": 9055,
+      "sha256": "e4c66a92cbec23e611b7dd2f5ff3173fd4bbc548768980026091842e554c9abb"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_vector3_array.hpp": {
+      "bytes": 9055,
+      "sha256": "d0c38d21d814ae46d6e880be63e3487058a4773e7422cdbe291475841c34f759"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/packed_vector4_array.hpp": {
+      "bytes": 8902,
+      "sha256": "3383de775a215d100cc6e3ead69ff849b1f24896cb62a76448f36b33eca52c90"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/rid.hpp": {
+      "bytes": 4436,
+      "sha256": "39de86956343765db0dffd5f39a86e7c2d613ae83c06b7fb568815e20494d06b"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/signal.hpp": {
+      "bytes": 5057,
+      "sha256": "41acd114bc5b1371289501ab7520353f1b0d7b0025058746bab323e1074bd801"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/string.hpp": {
+      "bytes": 24707,
+      "sha256": "63633ac4bb8c5f03281b4e28720467bc01698e528322e2568f1dfdfbab859977"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/string_name.hpp": {
+      "bytes": 21284,
+      "sha256": "e42dc759e899c3b267ae8c33d93f1c69717e908363cd2986ec1bfbf64ceaf943"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/utility_functions.hpp": {
+      "bytes": 14419,
+      "sha256": "2c02ec73e210b2704f5060b97ad68931a634031514ec9715992710ff28973789"
+    },
+    "native/sdk/generated/include/godot_cpp/variant/variant_size.hpp": {
+      "bytes": 2361,
+      "sha256": "e1943af6c49dd90b89eda97df3569fdd2dd6fef95bd0da979ecf8005949d4cbe"
+    },
+    "native/sdk/godot-cpp/gdextension/README.md": {
+      "bytes": 817,
+      "sha256": "216c44d922eab5c9a0409d7893bc337c47651a7327ecf5f2084abd775ce67d1d"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-3.json": {
+      "bytes": 5907082,
+      "sha256": "dfd54f071d53ef63d9c1be51150b38f5c55abdd68eb8b2caa357abeab4086a0f"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-4.json": {
+      "bytes": 6309398,
+      "sha256": "8a8386e3597083cf4357b3dbf501ede3d38a4e3f7ff75da86dfef0d1d9c3e3a8"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-5.json": {
+      "bytes": 6581513,
+      "sha256": "23d807e3f914f7a91b152a8a7b03638d4853f8e642b79f10ce85a43b44340bfd"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-6.json": {
+      "bytes": 6767785,
+      "sha256": "00a3ad6df2361ed3df6ef9bc8717fe0f49112012ee6e87a7b4cfb34465c9beed"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-7.json": {
+      "bytes": 6965055,
+      "sha256": "53d37f85be32b6d10fb2266ca51f6ef0c3a55728acdb7c8301b1458a93c00943"
+    },
+    "native/sdk/godot-cpp/gdextension/extension_api-4-8.json": {
+      "bytes": 7115235,
+      "sha256": "4673faca1c753374d225b55a4faf73e377edf63a5c3cabac3888ba079ddd1469"
+    },
+    "native/sdk/godot-cpp/gdextension/gdextension_interface.json": {
+      "bytes": 328092,
+      "sha256": "24bf12720a6fdef3f9d270c792c5abe9ef5f645d67335615383d7e42d77143f3"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/classes/editor_plugin_registration.hpp": {
+      "bytes": 2856,
+      "sha256": "6085f338cb81ff2523501bb3609c81e2646931a622d7d7cdf34c0dc1116e7475"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/classes/ref.hpp": {
+      "bytes": 8979,
+      "sha256": "e2f7cc0908b41ad2f8471e2b2b17e2b4ca64040979f58ab30dffae432436903f"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/classes/wrapped.hpp": {
+      "bytes": 21263,
+      "sha256": "bcaa37a2290eb1a2234c6dd27eb8ea244d2905253f06f701e70f9869071303e4"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/binder_common.hpp": {
+      "bytes": 26119,
+      "sha256": "a2e7c9644980512b48df48d74e23652b72e2658a2b614175226b4c7a54a70184"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/bit_field.hpp": {
+      "bytes": 2781,
+      "sha256": "1232d4aee1194cd88e59c0e47c26348e29a577d8fcb33d3d87e7c69d3197c6e8"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/builtin_ptrcall.hpp": {
+      "bytes": 4235,
+      "sha256": "87405d65b045b3c3dc305285f2219049fa5610fab78d9559fa3deded7d9e497f"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/class_db.hpp": {
+      "bytes": 17956,
+      "sha256": "6da8d104e722167721f668b16b42e4d714f75d23952d6a9a9ae97870afad0b0e"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/defs.hpp": {
+      "bytes": 14952,
+      "sha256": "0ce8ed1e3d749de2a2db42a6ad7dad61452f0e94a9478f6c6a6f9951d4f1acdd"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/engine_ptrcall.hpp": {
+      "bytes": 4743,
+      "sha256": "a00d5b22696e8f11c7e673a748cb41cb9899a3e52dab38e489853305d8a68029"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/error_macros.hpp": {
+      "bytes": 28501,
+      "sha256": "d438f76b4ce98d158a536a2471171370e1e162020ee74d411c8a2d153a273287"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/load_proc_address.inc": {
+      "bytes": 2834,
+      "sha256": "83a6a378c49d74cff0b651b4b0d4286d61652a9c82ceaa9c3eec8416485371bd"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/math.compat.inc": {
+      "bytes": 2612,
+      "sha256": "87e073e6fe8a17391bba19861d0f47a1ec6cd2d3d700492bbed247e4732d3401"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/math.hpp": {
+      "bytes": 27375,
+      "sha256": "b5705088adb1cc042d93f8e370d36992cc3b087475158d73e551dd87afd03420"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/math_defs.hpp": {
+      "bytes": 3894,
+      "sha256": "19ae56e2e288e0792904c72d323ea40cf792c0d4874ae1d988cbfb06bf05a1e0"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/math_funcs_binary.hpp": {
+      "bytes": 6081,
+      "sha256": "26955b5a7e2c139fcd5537a7217f3b3b31bb43449caf4cb14cf0b752ad88cf90"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/memory.hpp": {
+      "bytes": 11295,
+      "sha256": "92ba6292f543763bd3bd5fe61de7c2443b1eb6abd4e5519700b3d5f3e3c5954e"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/method_bind.hpp": {
+      "bytes": 26204,
+      "sha256": "185e3e41cc150c071ce9ff14970a4917a0509a25713f9ce364a2c012a1398fca"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/method_ptrcall.hpp": {
+      "bytes": 8786,
+      "sha256": "a589a78f31f7f876e579e4f848f4bd427370a64b946c91eb80cf7d9aadca5577"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/object.hpp": {
+      "bytes": 5911,
+      "sha256": "3129678557e9e2d8ae588026f6e317ab65a3c7c6409d3ba94ebc62fad63fa3dd"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/object_id.hpp": {
+      "bytes": 3251,
+      "sha256": "d9a13656b79cb24249cd53e7e9d5391ef30ce0e91ee2685aff849c44ef2bb5b1"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/print_string.hpp": {
+      "bytes": 3241,
+      "sha256": "46943c92266090e3bb7041afd3cd07f5d0ae84827990c36eb9b367d0d8d45862"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/property_info.hpp": {
+      "bytes": 5139,
+      "sha256": "f16adafe788c974c497ed2a5415e2abe97f9511b7bf71b98d50e3edc63468e3b"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/core/type_info.hpp": {
+      "bytes": 19327,
+      "sha256": "355a16583083f134d398d5cf0ddaaf8a58efb721b248d65e23bb7419776ad133"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/godot.hpp": {
+      "bytes": 6317,
+      "sha256": "8ed8a9b2aca0f0cf9d4cc555f3d30b0e120312a8d0a9475650de99e045df947f"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/a_hash_map.hpp": {
+      "bytes": 22146,
+      "sha256": "9631b1657af6389ef40b03a6806d6e75eb5e1baf32b78513a3ade51b1af7388b"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/cowdata.hpp": {
+      "bytes": 20227,
+      "sha256": "3e622d0915633667c003e6faece9ef1a674ac18144903381c0a2fd34d86cb498"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/hash_map.hpp": {
+      "bytes": 21093,
+      "sha256": "59536715b74447c54c0f97fee61775e09d9e8068cf2ca17fd950e2eec66c39a3"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/hash_set.hpp": {
+      "bytes": 16854,
+      "sha256": "4af03cdc23ecd71a4dfb42f4fc91d423a82712a1a6cc8614547f73edbf3be3d7"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/hashfuncs.hpp": {
+      "bytes": 18942,
+      "sha256": "ecbb8d8bacb981f89d8a06230fe4464fc9786529cd7bdc63cd3d58462b427fe7"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/list.hpp": {
+      "bytes": 17040,
+      "sha256": "92184009f8c9d4c035ac9a22185e1cae64acfe5ec4a4b76c3eacbe1a89963930"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/local_vector.hpp": {
+      "bytes": 12069,
+      "sha256": "501280916b2acb929b5591eb7125b4804cde6fbd0e39bd18edede4a8c971cf31"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/mutex.hpp": {
+      "bytes": 4727,
+      "sha256": "a77a375855acfbe75000993ba2c31ff5ad9d52d466fb1aae9df3184375da1889"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/pair.hpp": {
+      "bytes": 5432,
+      "sha256": "bcbc316ad2ed1e979f9f4811a1def72657b674a71fa2d23ddea34e8206618b9b"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/rb_map.hpp": {
+      "bytes": 19549,
+      "sha256": "48d73bef9da659ff6fdb1adf12adacf49081a4ad3e6e6877670dc9c548ae6d06"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/rb_set.hpp": {
+      "bytes": 17522,
+      "sha256": "8982c2e471fe379b4137f208db63ea152be277a6adb4b773e5372fa9770c09fc"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/rid_owner.hpp": {
+      "bytes": 13070,
+      "sha256": "bac56e86096d594ec79ceb474370144afc6e7b428bba6573c74ceee9f1b85f20"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/safe_refcount.hpp": {
+      "bytes": 7677,
+      "sha256": "73780cc9fcc05617812d41e649776160d0005b333c33a20e527350ab556de157"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/self_list.hpp": {
+      "bytes": 5450,
+      "sha256": "7bccc4d2f4a67ebf6ccc09308ca7d10a67b4e9bd84bfb234937bd561d18f7636"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/sort_array.hpp": {
+      "bytes": 10123,
+      "sha256": "a8d65b80896570378ffd2eb9154a163cc34c9e4423e860ceea13c018df6051f4"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/sort_list.hpp": {
+      "bytes": 4957,
+      "sha256": "83ad3bcdf3f785830790cc04d168cac7b0dc0b80664470ad6a2850da0e667bf0"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/span.hpp": {
+      "bytes": 8964,
+      "sha256": "8e19a712ad2217079776e8de7d293b73d04f385a264d0ed0b4f21c1d548b98bb"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/spin_lock.hpp": {
+      "bytes": 2598,
+      "sha256": "eaa19a91b1e0ff376226530f0b75602138c5c603982640e3af4ea125e212bf26"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/vector.hpp": {
+      "bytes": 12010,
+      "sha256": "eae07f47bc1bc62cf3ed9775b479282b2958ca3864d73d06b541f3ab023aaa8f"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/templates/vset.hpp": {
+      "bytes": 3957,
+      "sha256": "dbf765f2b5de4420e98e1985822510aa14f74623bb86395349b8bab247430a52"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/thirdparty/README.md": {
+      "bytes": 497,
+      "sha256": "7a3409e208b39b80fcf956438f08817775427294046261dc5058d37010f16cdf"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/thirdparty/misc/ok_color.h": {
+      "bytes": 18924,
+      "sha256": "776f1de191840badc27df53571340ee7db39ab640f77c9b4191053b7d3934281"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/aabb.hpp": {
+      "bytes": 15768,
+      "sha256": "188459a410f71c51af6c5b146e66098993688856a92a3d1af30709786bf72d5a"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/array_helpers.hpp": {
+      "bytes": 2720,
+      "sha256": "8a4cf784c6f77662afa0ce31e70d0e91163defa56cbc714dc2b9de3e583fac07"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/basis.hpp": {
+      "bytes": 12951,
+      "sha256": "3016d395f0a37e7a2e544025f2422e91491d912eb66c5043df19258bc69f9848"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/callable_custom.hpp": {
+      "bytes": 3347,
+      "sha256": "8aad04eebbb617820a1245815d5d5a100d149637dddb5dc22c51dd8b9837ca8c"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/callable_method_pointer.hpp": {
+      "bytes": 9309,
+      "sha256": "c2993a180cad09f0b2e1bae572cb5eb6185a302d97748f7da10bedd4aa60e245"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/char_range.inc.hpp": {
+      "bytes": 77721,
+      "sha256": "e967790d37e8c845ea3cc20de1dda3a107d9631165512c836c86d8120c3ce99a"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/char_string.hpp": {
+      "bytes": 6965,
+      "sha256": "7e5d48eccd146739801593f1d6e7e5e656ad31d5fd1521b1fe072a29d0ec4453"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/char_utils.hpp": {
+      "bytes": 5517,
+      "sha256": "c6495fd5d6042862e365b01f8bf7d99fa1cd2c3ba33ed436d0951a2ed52e352c"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/color.hpp": {
+      "bytes": 13815,
+      "sha256": "ffbf383b9795a2ac638d41f12c54e6f01e4448f5d83d8e792c0fbc78837c82fd"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/color_names.inc.hpp": {
+      "bytes": 8733,
+      "sha256": "8b7c7941033d7e27d4503bf6513bd8f1ae074d0d47536e5f0a56ed0ff73c5339"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/plane.hpp": {
+      "bytes": 6045,
+      "sha256": "88cc9f7ac0c34cf892443f64e285ea92b47d0936d7c415a690136cfc83f589c6"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/projection.hpp": {
+      "bytes": 8701,
+      "sha256": "21e7683f25ad6ac9998374460caead1c51e9417e18b51539e3456008436e0603"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/quaternion.hpp": {
+      "bytes": 9012,
+      "sha256": "0406a2c81cf94f981a3f92f3c6f89c90329624ea7864743d5185e3d5ed2378c6"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/rect2.hpp": {
+      "bytes": 12225,
+      "sha256": "ce0df8ced5e840839d6b7ecbe960d7ab7a95892062bf4a136b79857b9e37722e"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/rect2i.hpp": {
+      "bytes": 8041,
+      "sha256": "2fe8d3e4975b7d9279ae7e7f86b8248dd84426e203c09939eb41318e47dbd2aa"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/transform2d.hpp": {
+      "bytes": 10612,
+      "sha256": "d6b98ec560d8245c2483ee03baea0896c3a69d24474f8f2be4a71fef8a846ac0"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/transform3d.hpp": {
+      "bytes": 12738,
+      "sha256": "b3bfb70cce246b4e46751ac0afc6ef98413369fd8b80450b0cc56262210855d0"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/typed_array.hpp": {
+      "bytes": 6553,
+      "sha256": "e501619ecd1489869c119c87b6738d6999f9b328bba86b5577023257acce5bbe"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/typed_dictionary.hpp": {
+      "bytes": 27225,
+      "sha256": "2eaa60e32d2f872e241aceec54c0495a194aceb7597ef0f13e8e677df3c88ff9"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/variant.hpp": {
+      "bytes": 12723,
+      "sha256": "323e24a2ef20c5e9a9ab13fb432e8c2aaceeef6907e6c51c80883642354228e3"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/variant_internal.hpp": {
+      "bytes": 22307,
+      "sha256": "94f4ad7d68229e5668a6d054042c1fa8a056269e4f0101ea1c0e550f2a97afdc"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector2.hpp": {
+      "bytes": 12761,
+      "sha256": "531587faf8f667d0e1b40d66face7157a74feb3b90ad15962b03102d835dccdb"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector2i.hpp": {
+      "bytes": 9117,
+      "sha256": "ae61247a6ce22bc754401c84684c2c4ec8da12e2cc6a25716f11092df0a5aaec"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector3.hpp": {
+      "bytes": 20640,
+      "sha256": "6483c50dacdfc5f16f1f33f40434246a3cbfcba9166b1fc0dfca9675d72a89d9"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector3i.hpp": {
+      "bytes": 11328,
+      "sha256": "d3d3e135a74dd1f1841ff1fcc67116d2904f72d6b6e9ec109ba168462d3b82d1"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector4.hpp": {
+      "bytes": 9978,
+      "sha256": "e737b1e9a53b2b072f243587e124383ddf8dae0053b2d24943b050a45df156b9"
+    },
+    "native/sdk/godot-cpp/include/godot_cpp/variant/vector4i.hpp": {
+      "bytes": 11749,
+      "sha256": "2533107a2d99e60a5510ed336e6306795aa4786e784c2d7c7d663e4aa1443af3"
+    },
+    "native/sdk/lib/libgodot-cpp.a": {
+      "bytes": 9861196,
+      "sha256": "1628e18768a47b7f08a28b65c19b3d066cb609c5548676e1980af6b49073293c"
+    },
+    "native/sdk/manifest.json": {
+      "bytes": 26816,
+      "sha256": "6ebd3377d28c63eab1088548ec72716d55119c6f23111225f4e04a73415db827"
+    },
+    "tests/native_audio/owned_process_v5.py": {
+      "bytes": 26088,
+      "sha256": "1570ec96312c22633f3c3ad3a5da79199d55774d57653ec087fbd4645e1ae090"
+    },
+    "tools/toolchain.json": {
+      "bytes": 175,
+      "sha256": "2deeedfda42c5d98baf0175c605ea8106598b946cb52641b2fb7fbb72199a619"
+    }
+  },
+  "main_sha256": "58da5769beecc90db060416e170fb2e6b9083bdf339435ed40d605b84a68321f",
+  "native_module_sha256": "8f293549dd9e7a49f0d9d98d867b09c7591c73cb763f4badda81fa06efd3d983",
+  "source_commit": "8f5b279224fdab968a05baf401ed0c84415b64de",
+  "version": "r12-final"
+}

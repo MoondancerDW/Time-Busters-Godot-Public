@@ -1,0 +1,697 @@
+{
+  "schema_version": 1,
+  "source_pin": "e103d348c4b2d8df7b819126d855e19381cb9a87",
+  "api_version": "4.7.2",
+  "api_sha256": "d0e4c08c03b165156dabe6bfb6a906baf0069189f62035341230a246c86d6986",
+  "library_sha256": "1628e18768a47b7f08a28b65c19b3d066cb609c5548676e1980af6b49073293c",
+  "toolchain_sha256": "ee2d74ce47421709d8152cd26939a875f9147227a27a58454bc566d37a334cf2",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "deps/nlohmann/json.hpp",
+      "bytes": 953436,
+      "sha256": "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63"
+    },
+    {
+      "path": "deps/nlohmann/LICENSE.MIT",
+      "bytes": 1076,
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    },
+    {
+      "path": "generated/include/gdextension_interface.h",
+      "bytes": 145569,
+      "sha256": "625245dba4c08f346e96e6d7e413b83bca6e94915b514887d1dad4b29c03bfab"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/audio_frame.hpp",
+      "bytes": 2514,
+      "sha256": "2de72e48ab5d4d11ffbbb77e0064f394225840c7f39296b6edbd0c147bbcbf80"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/caret_info.hpp",
+      "bytes": 2663,
+      "sha256": "2dca72e6fce429333d8a8d8670eee34cc02933b18365adf9a06984521acf9712"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/class_db_singleton.hpp",
+      "bytes": 12903,
+      "sha256": "e0380160a0cd190f42563684983957f6df945e5c72f224d0f5b09c41e2e8a987"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/file_access.hpp",
+      "bytes": 7755,
+      "sha256": "c37da7e62132dd935e33f3cacf9a3ab8d75536462522f0eeb219692b42e6a44a"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/global_constants.hpp",
+      "bytes": 14883,
+      "sha256": "829008dfced6d729dab5c03dbfa9e36f3d8b5036a23d3af245dc79703086d33e"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/global_constants_binds.hpp",
+      "bytes": 3105,
+      "sha256": "12df51b5015d84d63b2eab1675334e2d5cfe521dc1275979a318dc761767bb5d"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/glyph.hpp",
+      "bytes": 2735,
+      "sha256": "1ae9f96bae049789b54c863dc6f331508cf092c1dd375c4e01b85925c4799bb1"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/image.hpp",
+      "bytes": 10057,
+      "sha256": "5224fa32b96f789bb792c83defab4dbbca709f32cdd109a4f9166e69791830e2"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/object.hpp",
+      "bytes": 7917,
+      "sha256": "1bd38e036e9a166b9f468b4ea946dfe6c9f17321355495c02c37d9e386a6274a"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/os.hpp",
+      "bytes": 8092,
+      "sha256": "439b05d65b9aa44a32fbcecb437e134a20c712917be3fbb3d3c219c70b5724dc"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server2d_extension_motion_result.hpp",
+      "bytes": 2885,
+      "sha256": "6bf68a26120f5840cefbb7e659ce43f5f3da76857983681b5edbb2888bb291ab"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server2d_extension_ray_result.hpp",
+      "bytes": 2713,
+      "sha256": "75636017eeeeeb3f0193713a4f26ac8cb785b6c64198691f7133b27032b9a44d"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server2d_extension_shape_rest_info.hpp",
+      "bytes": 2687,
+      "sha256": "4792c5a3eb54ed1e77ff52e13bf1196f535e212badaddd324820380b04502308"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server2d_extension_shape_result.hpp",
+      "bytes": 2679,
+      "sha256": "e743d9c140de11c122eaeef037f524f927c4292c377a0bb591966d29e4f84d41"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server3d_extension_motion_collision.hpp",
+      "bytes": 2782,
+      "sha256": "6c1dce1f7743b576af4a15bb16d162c27dc6500907b15ac96dd0e81ca75cde26"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server3d_extension_motion_result.hpp",
+      "bytes": 2831,
+      "sha256": "ae0fbdf9977c8be852b0232ea7a282d8644ce14af96996b5a04436d7c0abfa88"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server3d_extension_ray_result.hpp",
+      "bytes": 2731,
+      "sha256": "9060831d2f47f4b9591e083d72728627e99eb804840c9576ac0d7005db889d89"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server3d_extension_shape_rest_info.hpp",
+      "bytes": 2687,
+      "sha256": "d763132d33d070ebac74d68b5c09dd230015b4b480f3b094485fcd695e0f3e1b"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/physics_server3d_extension_shape_result.hpp",
+      "bytes": 2679,
+      "sha256": "7f3be9b7087fe187eb55e2f6504a1ce3b9bd8dcc757ab6e13ac8d74f92847aeb"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/ref_counted.hpp",
+      "bytes": 2815,
+      "sha256": "8f0e0ff1c576fde01e60e9eb61efbee88f4fd07a13417d54a902a6b54b11b181"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/resource.hpp",
+      "bytes": 4777,
+      "sha256": "9c08ce6f0b20299ec3350d3b153b714a459b8f1a7338aadd16a9c53c526ca436"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/script_language_extension_profiling_info.hpp",
+      "bytes": 2675,
+      "sha256": "677d7f2babf0083ef2b3a82becb93eca35000ddd8773455dccc1ca2f740dbff2"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/worker_thread_pool.hpp",
+      "bytes": 4024,
+      "sha256": "34a059d873c6dfd195cf63c88e0bb09e543deab357c9fab1918189b601feb160"
+    },
+    {
+      "path": "generated/include/godot_cpp/classes/xml_parser.hpp",
+      "bytes": 3849,
+      "sha256": "e03d822012be09b727db6466dfffeda9699531ced47c236b74e0213cc0bdedab"
+    },
+    {
+      "path": "generated/include/godot_cpp/core/ext_wrappers.gen.inc",
+      "bytes": 11573,
+      "sha256": "a6b3086127b60de43bf5396fddac4d274c3c15fe7bdbcf3ad89f0ac4de048a0f"
+    },
+    {
+      "path": "generated/include/godot_cpp/core/gdextension_interface_loader.hpp",
+      "bytes": 19599,
+      "sha256": "5518ed69a2bd26f10fbf31ebfa8ae15fec59f5a59647af238259c4f404cab1e0"
+    },
+    {
+      "path": "generated/include/godot_cpp/core/gdvirtual.gen.inc",
+      "bytes": 280270,
+      "sha256": "ee45264fbacc90ded8036814334c761e6168fe01e42a6d35f42ae7bd17172ba1"
+    },
+    {
+      "path": "generated/include/godot_cpp/core/version.hpp",
+      "bytes": 2502,
+      "sha256": "f4f8c126d31858bd2b535978c3720a025584f2bc8846dd24dec453c8cd6f8ce5"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/array.hpp",
+      "bytes": 12392,
+      "sha256": "6a686eb5875594fd51466e124cd33fc2a1c90311fb02adf69d5cc342eb5336fb"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/builtin_binds.hpp",
+      "bytes": 2633,
+      "sha256": "460ed733dd11d00c93c239b11b79718f6b98b35fa7ac5f17d28020ac9e2aff4b"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/builtin_types.hpp",
+      "bytes": 3885,
+      "sha256": "303bf92a10e2258a6fda9e1d80925e1538d210fdaefd916f4a082c0bc5f5dae3"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/builtin_vararg_methods.hpp",
+      "bytes": 5301,
+      "sha256": "0620755a9b72c408794437a9b01039849612493e2c42d2615899ad50fab07972"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/callable.hpp",
+      "bytes": 6339,
+      "sha256": "09d468430ea79ce132aaf8724ed45a5e484db789130127b666576b7cad3b54e3"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/dictionary.hpp",
+      "bytes": 8134,
+      "sha256": "200ec11102da6d4c0ad18d4bf60cb78a6beef1e96b33c0588e11c4f3e82b4971"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/node_path.hpp",
+      "bytes": 5298,
+      "sha256": "b789672b0b29ddaabf54c4762e13fe424c2c13dc6168cc7bf66aa34e1cae3226"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_byte_array.hpp",
+      "bytes": 13976,
+      "sha256": "9d0693541be7a007242ac4b21721e1d12d67202305d7481fbf02efd225cd8eb2"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_color_array.hpp",
+      "bytes": 8792,
+      "sha256": "f230e2f366e920fb70bc09294c3b79a828d803f9251e2184aa08ff054c060c2d"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_float32_array.hpp",
+      "bytes": 8724,
+      "sha256": "bf6572a67a251bf6f6658ce084b26824451e3012b1f717382f32f96d9730a4ec"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_float64_array.hpp",
+      "bytes": 8738,
+      "sha256": "c693b76ccaa470863063ad2fa5434229e9022787e47dad96d2250c061234d0e5"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_int32_array.hpp",
+      "bytes": 8710,
+      "sha256": "d29fe37c95aec98c494945263e4fe673eea63eb516db543794cab183586a4693"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_int64_array.hpp",
+      "bytes": 8710,
+      "sha256": "ee6db0774c10751d853f644eab6cbd87797a0c74bc482dc52f6bd08c2cd50189"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_string_array.hpp",
+      "bytes": 8846,
+      "sha256": "c4039e037e27e00b3f5c791feea6597024d09dd810ad22287b36dcfdd6a78a9b"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_vector2_array.hpp",
+      "bytes": 9055,
+      "sha256": "e4c66a92cbec23e611b7dd2f5ff3173fd4bbc548768980026091842e554c9abb"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_vector3_array.hpp",
+      "bytes": 9055,
+      "sha256": "d0c38d21d814ae46d6e880be63e3487058a4773e7422cdbe291475841c34f759"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/packed_vector4_array.hpp",
+      "bytes": 8902,
+      "sha256": "3383de775a215d100cc6e3ead69ff849b1f24896cb62a76448f36b33eca52c90"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/rid.hpp",
+      "bytes": 4436,
+      "sha256": "39de86956343765db0dffd5f39a86e7c2d613ae83c06b7fb568815e20494d06b"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/signal.hpp",
+      "bytes": 5057,
+      "sha256": "41acd114bc5b1371289501ab7520353f1b0d7b0025058746bab323e1074bd801"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/string.hpp",
+      "bytes": 24707,
+      "sha256": "63633ac4bb8c5f03281b4e28720467bc01698e528322e2568f1dfdfbab859977"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/string_name.hpp",
+      "bytes": 21284,
+      "sha256": "e42dc759e899c3b267ae8c33d93f1c69717e908363cd2986ec1bfbf64ceaf943"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/utility_functions.hpp",
+      "bytes": 14419,
+      "sha256": "2c02ec73e210b2704f5060b97ad68931a634031514ec9715992710ff28973789"
+    },
+    {
+      "path": "generated/include/godot_cpp/variant/variant_size.hpp",
+      "bytes": 2361,
+      "sha256": "e1943af6c49dd90b89eda97df3569fdd2dd6fef95bd0da979ecf8005949d4cbe"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-3.json",
+      "bytes": 5907082,
+      "sha256": "dfd54f071d53ef63d9c1be51150b38f5c55abdd68eb8b2caa357abeab4086a0f"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-4.json",
+      "bytes": 6309398,
+      "sha256": "8a8386e3597083cf4357b3dbf501ede3d38a4e3f7ff75da86dfef0d1d9c3e3a8"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-5.json",
+      "bytes": 6581513,
+      "sha256": "23d807e3f914f7a91b152a8a7b03638d4853f8e642b79f10ce85a43b44340bfd"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-6.json",
+      "bytes": 6767785,
+      "sha256": "00a3ad6df2361ed3df6ef9bc8717fe0f49112012ee6e87a7b4cfb34465c9beed"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-7.json",
+      "bytes": 6965055,
+      "sha256": "53d37f85be32b6d10fb2266ca51f6ef0c3a55728acdb7c8301b1458a93c00943"
+    },
+    {
+      "path": "godot-cpp/gdextension/extension_api-4-8.json",
+      "bytes": 7115235,
+      "sha256": "4673faca1c753374d225b55a4faf73e377edf63a5c3cabac3888ba079ddd1469"
+    },
+    {
+      "path": "godot-cpp/gdextension/gdextension_interface.json",
+      "bytes": 328092,
+      "sha256": "24bf12720a6fdef3f9d270c792c5abe9ef5f645d67335615383d7e42d77143f3"
+    },
+    {
+      "path": "godot-cpp/gdextension/README.md",
+      "bytes": 817,
+      "sha256": "216c44d922eab5c9a0409d7893bc337c47651a7327ecf5f2084abd775ce67d1d"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/classes/editor_plugin_registration.hpp",
+      "bytes": 2856,
+      "sha256": "6085f338cb81ff2523501bb3609c81e2646931a622d7d7cdf34c0dc1116e7475"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/classes/ref.hpp",
+      "bytes": 8979,
+      "sha256": "e2f7cc0908b41ad2f8471e2b2b17e2b4ca64040979f58ab30dffae432436903f"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/classes/wrapped.hpp",
+      "bytes": 21263,
+      "sha256": "bcaa37a2290eb1a2234c6dd27eb8ea244d2905253f06f701e70f9869071303e4"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/binder_common.hpp",
+      "bytes": 26119,
+      "sha256": "a2e7c9644980512b48df48d74e23652b72e2658a2b614175226b4c7a54a70184"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/bit_field.hpp",
+      "bytes": 2781,
+      "sha256": "1232d4aee1194cd88e59c0e47c26348e29a577d8fcb33d3d87e7c69d3197c6e8"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/builtin_ptrcall.hpp",
+      "bytes": 4235,
+      "sha256": "87405d65b045b3c3dc305285f2219049fa5610fab78d9559fa3deded7d9e497f"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/class_db.hpp",
+      "bytes": 17956,
+      "sha256": "6da8d104e722167721f668b16b42e4d714f75d23952d6a9a9ae97870afad0b0e"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/defs.hpp",
+      "bytes": 14952,
+      "sha256": "0ce8ed1e3d749de2a2db42a6ad7dad61452f0e94a9478f6c6a6f9951d4f1acdd"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/engine_ptrcall.hpp",
+      "bytes": 4743,
+      "sha256": "a00d5b22696e8f11c7e673a748cb41cb9899a3e52dab38e489853305d8a68029"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/error_macros.hpp",
+      "bytes": 28501,
+      "sha256": "d438f76b4ce98d158a536a2471171370e1e162020ee74d411c8a2d153a273287"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/load_proc_address.inc",
+      "bytes": 2834,
+      "sha256": "83a6a378c49d74cff0b651b4b0d4286d61652a9c82ceaa9c3eec8416485371bd"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/math.compat.inc",
+      "bytes": 2612,
+      "sha256": "87e073e6fe8a17391bba19861d0f47a1ec6cd2d3d700492bbed247e4732d3401"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/math.hpp",
+      "bytes": 27375,
+      "sha256": "b5705088adb1cc042d93f8e370d36992cc3b087475158d73e551dd87afd03420"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/math_defs.hpp",
+      "bytes": 3894,
+      "sha256": "19ae56e2e288e0792904c72d323ea40cf792c0d4874ae1d988cbfb06bf05a1e0"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/math_funcs_binary.hpp",
+      "bytes": 6081,
+      "sha256": "26955b5a7e2c139fcd5537a7217f3b3b31bb43449caf4cb14cf0b752ad88cf90"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/memory.hpp",
+      "bytes": 11295,
+      "sha256": "92ba6292f543763bd3bd5fe61de7c2443b1eb6abd4e5519700b3d5f3e3c5954e"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/method_bind.hpp",
+      "bytes": 26204,
+      "sha256": "185e3e41cc150c071ce9ff14970a4917a0509a25713f9ce364a2c012a1398fca"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/method_ptrcall.hpp",
+      "bytes": 8786,
+      "sha256": "a589a78f31f7f876e579e4f848f4bd427370a64b946c91eb80cf7d9aadca5577"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/object.hpp",
+      "bytes": 5911,
+      "sha256": "3129678557e9e2d8ae588026f6e317ab65a3c7c6409d3ba94ebc62fad63fa3dd"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/object_id.hpp",
+      "bytes": 3251,
+      "sha256": "d9a13656b79cb24249cd53e7e9d5391ef30ce0e91ee2685aff849c44ef2bb5b1"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/print_string.hpp",
+      "bytes": 3241,
+      "sha256": "46943c92266090e3bb7041afd3cd07f5d0ae84827990c36eb9b367d0d8d45862"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/property_info.hpp",
+      "bytes": 5139,
+      "sha256": "f16adafe788c974c497ed2a5415e2abe97f9511b7bf71b98d50e3edc63468e3b"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/core/type_info.hpp",
+      "bytes": 19327,
+      "sha256": "355a16583083f134d398d5cf0ddaaf8a58efb721b248d65e23bb7419776ad133"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/godot.hpp",
+      "bytes": 6317,
+      "sha256": "8ed8a9b2aca0f0cf9d4cc555f3d30b0e120312a8d0a9475650de99e045df947f"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/a_hash_map.hpp",
+      "bytes": 22146,
+      "sha256": "9631b1657af6389ef40b03a6806d6e75eb5e1baf32b78513a3ade51b1af7388b"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/cowdata.hpp",
+      "bytes": 20227,
+      "sha256": "3e622d0915633667c003e6faece9ef1a674ac18144903381c0a2fd34d86cb498"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/hash_map.hpp",
+      "bytes": 21093,
+      "sha256": "59536715b74447c54c0f97fee61775e09d9e8068cf2ca17fd950e2eec66c39a3"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/hash_set.hpp",
+      "bytes": 16854,
+      "sha256": "4af03cdc23ecd71a4dfb42f4fc91d423a82712a1a6cc8614547f73edbf3be3d7"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/hashfuncs.hpp",
+      "bytes": 18942,
+      "sha256": "ecbb8d8bacb981f89d8a06230fe4464fc9786529cd7bdc63cd3d58462b427fe7"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/list.hpp",
+      "bytes": 17040,
+      "sha256": "92184009f8c9d4c035ac9a22185e1cae64acfe5ec4a4b76c3eacbe1a89963930"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/local_vector.hpp",
+      "bytes": 12069,
+      "sha256": "501280916b2acb929b5591eb7125b4804cde6fbd0e39bd18edede4a8c971cf31"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/mutex.hpp",
+      "bytes": 4727,
+      "sha256": "a77a375855acfbe75000993ba2c31ff5ad9d52d466fb1aae9df3184375da1889"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/pair.hpp",
+      "bytes": 5432,
+      "sha256": "bcbc316ad2ed1e979f9f4811a1def72657b674a71fa2d23ddea34e8206618b9b"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/rb_map.hpp",
+      "bytes": 19549,
+      "sha256": "48d73bef9da659ff6fdb1adf12adacf49081a4ad3e6e6877670dc9c548ae6d06"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/rb_set.hpp",
+      "bytes": 17522,
+      "sha256": "8982c2e471fe379b4137f208db63ea152be277a6adb4b773e5372fa9770c09fc"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/rid_owner.hpp",
+      "bytes": 13070,
+      "sha256": "bac56e86096d594ec79ceb474370144afc6e7b428bba6573c74ceee9f1b85f20"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/safe_refcount.hpp",
+      "bytes": 7677,
+      "sha256": "73780cc9fcc05617812d41e649776160d0005b333c33a20e527350ab556de157"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/self_list.hpp",
+      "bytes": 5450,
+      "sha256": "7bccc4d2f4a67ebf6ccc09308ca7d10a67b4e9bd84bfb234937bd561d18f7636"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/sort_array.hpp",
+      "bytes": 10123,
+      "sha256": "a8d65b80896570378ffd2eb9154a163cc34c9e4423e860ceea13c018df6051f4"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/sort_list.hpp",
+      "bytes": 4957,
+      "sha256": "83ad3bcdf3f785830790cc04d168cac7b0dc0b80664470ad6a2850da0e667bf0"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/span.hpp",
+      "bytes": 8964,
+      "sha256": "8e19a712ad2217079776e8de7d293b73d04f385a264d0ed0b4f21c1d548b98bb"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/spin_lock.hpp",
+      "bytes": 2598,
+      "sha256": "eaa19a91b1e0ff376226530f0b75602138c5c603982640e3af4ea125e212bf26"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/vector.hpp",
+      "bytes": 12010,
+      "sha256": "eae07f47bc1bc62cf3ed9775b479282b2958ca3864d73d06b541f3ab023aaa8f"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/templates/vset.hpp",
+      "bytes": 3957,
+      "sha256": "dbf765f2b5de4420e98e1985822510aa14f74623bb86395349b8bab247430a52"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/thirdparty/misc/ok_color.h",
+      "bytes": 18924,
+      "sha256": "776f1de191840badc27df53571340ee7db39ab640f77c9b4191053b7d3934281"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/thirdparty/README.md",
+      "bytes": 497,
+      "sha256": "7a3409e208b39b80fcf956438f08817775427294046261dc5058d37010f16cdf"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/aabb.hpp",
+      "bytes": 15768,
+      "sha256": "188459a410f71c51af6c5b146e66098993688856a92a3d1af30709786bf72d5a"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/array_helpers.hpp",
+      "bytes": 2720,
+      "sha256": "8a4cf784c6f77662afa0ce31e70d0e91163defa56cbc714dc2b9de3e583fac07"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/basis.hpp",
+      "bytes": 12951,
+      "sha256": "3016d395f0a37e7a2e544025f2422e91491d912eb66c5043df19258bc69f9848"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/callable_custom.hpp",
+      "bytes": 3347,
+      "sha256": "8aad04eebbb617820a1245815d5d5a100d149637dddb5dc22c51dd8b9837ca8c"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/callable_method_pointer.hpp",
+      "bytes": 9309,
+      "sha256": "c2993a180cad09f0b2e1bae572cb5eb6185a302d97748f7da10bedd4aa60e245"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/char_range.inc.hpp",
+      "bytes": 77721,
+      "sha256": "e967790d37e8c845ea3cc20de1dda3a107d9631165512c836c86d8120c3ce99a"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/char_string.hpp",
+      "bytes": 6965,
+      "sha256": "7e5d48eccd146739801593f1d6e7e5e656ad31d5fd1521b1fe072a29d0ec4453"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/char_utils.hpp",
+      "bytes": 5517,
+      "sha256": "c6495fd5d6042862e365b01f8bf7d99fa1cd2c3ba33ed436d0951a2ed52e352c"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/color.hpp",
+      "bytes": 13815,
+      "sha256": "ffbf383b9795a2ac638d41f12c54e6f01e4448f5d83d8e792c0fbc78837c82fd"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/color_names.inc.hpp",
+      "bytes": 8733,
+      "sha256": "8b7c7941033d7e27d4503bf6513bd8f1ae074d0d47536e5f0a56ed0ff73c5339"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/plane.hpp",
+      "bytes": 6045,
+      "sha256": "88cc9f7ac0c34cf892443f64e285ea92b47d0936d7c415a690136cfc83f589c6"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/projection.hpp",
+      "bytes": 8701,
+      "sha256": "21e7683f25ad6ac9998374460caead1c51e9417e18b51539e3456008436e0603"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/quaternion.hpp",
+      "bytes": 9012,
+      "sha256": "0406a2c81cf94f981a3f92f3c6f89c90329624ea7864743d5185e3d5ed2378c6"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/rect2.hpp",
+      "bytes": 12225,
+      "sha256": "ce0df8ced5e840839d6b7ecbe960d7ab7a95892062bf4a136b79857b9e37722e"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/rect2i.hpp",
+      "bytes": 8041,
+      "sha256": "2fe8d3e4975b7d9279ae7e7f86b8248dd84426e203c09939eb41318e47dbd2aa"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/transform2d.hpp",
+      "bytes": 10612,
+      "sha256": "d6b98ec560d8245c2483ee03baea0896c3a69d24474f8f2be4a71fef8a846ac0"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/transform3d.hpp",
+      "bytes": 12738,
+      "sha256": "b3bfb70cce246b4e46751ac0afc6ef98413369fd8b80450b0cc56262210855d0"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/typed_array.hpp",
+      "bytes": 6553,
+      "sha256": "e501619ecd1489869c119c87b6738d6999f9b328bba86b5577023257acce5bbe"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/typed_dictionary.hpp",
+      "bytes": 27225,
+      "sha256": "2eaa60e32d2f872e241aceec54c0495a194aceb7597ef0f13e8e677df3c88ff9"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/variant.hpp",
+      "bytes": 12723,
+      "sha256": "323e24a2ef20c5e9a9ab13fb432e8c2aaceeef6907e6c51c80883642354228e3"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/variant_internal.hpp",
+      "bytes": 22307,
+      "sha256": "94f4ad7d68229e5668a6d054042c1fa8a056269e4f0101ea1c0e550f2a97afdc"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector2.hpp",
+      "bytes": 12761,
+      "sha256": "531587faf8f667d0e1b40d66face7157a74feb3b90ad15962b03102d835dccdb"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector2i.hpp",
+      "bytes": 9117,
+      "sha256": "ae61247a6ce22bc754401c84684c2c4ec8da12e2cc6a25716f11092df0a5aaec"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector3.hpp",
+      "bytes": 20640,
+      "sha256": "6483c50dacdfc5f16f1f33f40434246a3cbfcba9166b1fc0dfca9675d72a89d9"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector3i.hpp",
+      "bytes": 11328,
+      "sha256": "d3d3e135a74dd1f1841ff1fcc67116d2904f72d6b6e9ec109ba168462d3b82d1"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector4.hpp",
+      "bytes": 9978,
+      "sha256": "e737b1e9a53b2b072f243587e124383ddf8dae0053b2d24943b050a45df156b9"
+    },
+    {
+      "path": "godot-cpp/include/godot_cpp/variant/vector4i.hpp",
+      "bytes": 11749,
+      "sha256": "2533107a2d99e60a5510ed336e6306795aa4786e784c2d7c7d663e4aa1443af3"
+    },
+    {
+      "path": "lib/libgodot-cpp.a",
+      "bytes": 9861196,
+      "sha256": "1628e18768a47b7f08a28b65c19b3d066cb609c5548676e1980af6b49073293c"
+    },
+    {
+      "path": "LICENSE.MIT",
+      "bytes": 1093,
+      "sha256": "26a5b210d90760156ce886267ce9df235787dcc6cebfd7ecd95ef5b6fdcc95bf"
+    }
+  ],
+  "scope": "Isolated SDK/header/JSON snapshot matching the accepted R09 build. Legacy R00/P12 shared SDK is not written."
+}

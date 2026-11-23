@@ -1,0 +1,454 @@
+// LiT level-logic VM: TestLogicCond 0x42a7d0 (99 conditions, table 0x4ac550) and RunLogicAction 0x42c6d0
+// (129 actions, table 0x4ac6e0). Semantics: docs/re/LOGIC.md §4/§5. `self` = the actor running the item
+// (nullptr = Bugs); P = Bugs. The title front end's opcodes (C96, A93, A100, A128) and the pause menu's item table /
+// volume opcodes (C92, C93, C97, A102-A105, A109, A110, A119-A127) are ported; the key-capture and video-mode ones
+// (C94, C95, A106-A108, A111-A118: bbtime's own Options screen) return false / do nothing and are listed in
+// LitWorld::unsupported, as are camera effects without a simulated counterpart.
+// C55/C56, A49/A51/A52 run overlay text scripts (lit_overlay.cpp).
+#include "bb/game/lit_world.h"
+
+#include <algorithm>
+#include <format>
+
+namespace bb::game {
+namespace {
+
+// C57/C69/C90 mask byte: bits 0-3 triangle/circle/cross/square, bits 4-7 up/right/down/left -> pad word bits.
+uint16_t padMask(uint8_t a) { return uint16_t((a & 0xf) << 4 | (a & 0xf0) << 8); }
+// C79/C80 (0x42b820 / 0x42b850) mask byte: bits 0-3 L2/R2/L1/R1, bits 4-7 Select/L3/R3/Start.
+uint16_t padMask2(uint8_t a) { return uint16_t((a & 0xf) | (a & 0xf0) << 4); }
+
+// Angle from `from` to `to` minus `yaw`, wrapped to (-0x800, 0x800] (0x42ae30 / 0x42af90).
+int32_t facing(const V3& from, const V3& to, int32_t yaw) { return angleDiff(ratan2(to.x - from.x, to.z - from.z), yaw); }
+
+// C17-C20 side filter: A = 1 only diff <= 0, A = 2 only diff >= 0.
+bool within(int32_t d, uint8_t a) { return d < 0x294 && d > -0x294 && (a != 1 || d < 1) && (a != 2 || d > -1); }
+
+} // namespace
+
+bool LitWorld::cond(const LogicItem& it, LitActor* self) {
+    Mover& me = self ? static_cast<Mover&>(*self) : static_cast<Mover&>(p);
+    const uint8_t A = it.a, B = it.b;
+    const uint16_t ab = uint16_t(A | B << 8);
+    const auto s8 = [](uint8_t v) { return int8_t(v); };
+    const uint32_t t = me.timer;
+    switch (it.cond) {
+    case 0: return true;
+    case 1: return s8(S[B]) == s8(A);
+    case 2: return G[B] == A;
+    case 3: return A < S[B];
+    case 4: return A < G[B];
+    case 5: return A <= S[B];
+    case 6: return A <= G[B];
+    case 7: return S[B] < A;
+    case 8: return G[B] < A;
+    case 9: return S[B] <= A;
+    case 10: return G[B] <= A;
+    case 11: return (p.flags14 & 0x2000020) == 0;
+    case 12: return p.state == A;
+    case 13: return !self || self->rider == -1;             // self+0x6c (carried actor) == 0 (Bugs carries nothing here)
+    case 14: return p.zone == A;
+    case 15: case 61: return S[B] == S[A];
+    case 16: case 62: return G[B] == G[A];
+    case 17: { const int32_t d = facing(me.pos, p.pos, p.yaw); return !(d < 0x294 && d > -0x294) && !(A == 1 && d > 0) && !(A == 2 && d < 0); }
+    case 18: return within(facing(me.pos, p.pos, p.yaw), A);
+    case 19: return within(facing(me.pos, p.pos, me.yaw), A);
+    case 20: return !within(facing(me.pos, p.pos, me.yaw), A);
+    case 21: return t < ab;
+    case 22: return t > ab;
+    case 23: return t == ab;
+    case 24: return t / 30 < ab;
+    case 25: return t / 30 > ab;
+    case 26: return t % 30 == 0 && t / 30 == ab;
+    case 27: return t / 1800 < ab;
+    case 28: return t / 1800 > ab;
+    case 29: return t / 1800 == ab;
+    case 30: return (S[B] & A) != 0;
+    case 31: return (G[B] & A) != 0;
+    case 32: return (p.flags14 & 0x2000020) != 0;
+    case 33: case 76: return (p.flags14 & 0x10) != 0;
+    case 34: case 39: return (S[B] & A) == 0;
+    case 35: case 40: return (G[B] & A) == 0;
+    case 36: return (p.flags14 & 0x1000000) != 0;
+    case 37: return S[B] != A;
+    case 38: return G[B] != A;
+    case 41: return (p.flags14 & 0x40) != 0;
+    case 42: return (p.flags14 & 0x40) == 0;
+    case 43: return self && self->rider != -1;              // self+0x6c != 0: carrying an actor or Bugs
+    case 44: return p.zone != A;
+    case 45: return camHold_ != 0;
+    case 46: return S[B] == A;
+    case 47: return G[B] == A;
+    case 48: return (p.flags14 & 0x1000000) == 0;
+    case 49: return (pad.pressed & PadR1) != 0;
+    case 50: { const int32_t y = (me.yaw & 0xfff) >> 4; return A < y && y < B; }
+    case 51: return (p.flags18 & 2) != 0;
+    case 52: return (p.flags18 & 4) != 0;
+    case 53: return (p.flags18 & 2) == 0;
+    case 54: return (p.flags18 & 4) == 0;
+    case 55: overlayStatus_ = overlay(it.x); return (A & overlayStatus_) != 0;  // 0x42b450
+    case 56: return (A & overlayStatus_) != 0;
+    case 57: case 69: {  // 0x42b4a0 / 0x42b500: Start (or Return) also counts as cross; C69 = none of them
+        const bool any = ((pad.raw | (pad.raw & PadStart ? PadCross : 0)) & padMask(A)) != 0;
+        return it.cond == 57 ? any : !any;
+    }
+    case 58: return me.reg == A;
+    case 59: return int16_t(A) < me.reg;
+    case 60: return me.reg < int16_t(A);
+    case 63: return S[B] != S[A];
+    case 64: return G[B] != G[A];
+    case 65: return S[A] < S[B];
+    case 66: return G[A] < G[B];
+    case 67: return S[B] < S[A];
+    case 68: return G[B] < G[A];
+    case 70: return s8(A) < s8(S[B]);
+    case 71: return s8(S[B]) < s8(A);
+    case 72: return s8(S[A]) < s8(S[B]);
+    case 73: return s8(S[B]) < s8(S[A]);
+    case 74: return me.zone == A;
+    case 75: return me.zone != A;
+    case 77: return (p.flags14 & 0x10) == 0;
+    case 78: { const PlayerState* st = findState(p.state); return st && p.seq <= 4 && uint16_t(st->moves[p.seq]) == A; }
+    case 79: return (pad.raw & padMask2(A)) != 0;
+    case 80: return (pad.raw & padMask2(A)) == 0;
+    case 81: return (pad.pressed & PadR1) == 0;
+    case 82: case 83: {  // 0x42b640: A bits -> flags14, B bits -> flags18
+        static constexpr uint32_t a14[8] = {0x1, 0x2, 0x10, 0x8, 0x200, 0x400, 0x4000, 0x1000000};
+        static constexpr uint32_t b18[5] = {0x2000000, 0x10000000, 0x80000000, 0x2, 0x4};
+        bool any = false;
+        for (int k = 0; k < 8; ++k) any |= (A >> k & 1) && (p.flags14 & a14[k]);
+        for (int k = 0; k < 5; ++k) any |= (B >> k & 1) && (p.flags18 & b18[k]);
+        return it.cond == 82 ? any : !any;
+    }
+    case 84: { const int32_t h = int8_t(p.pos.y >> 8); return s8(A) <= h && h <= s8(B); }
+    case 85: case 87:  // 0x42b930 / 0x42b990: sound A on any voice / on self's voice (start pending or playing) == (B == 1)
+        return sfx.playing(A, it.cond == 87 ? emitter(self) : 0) == (B == 1);
+    case 86: return false;                                  // Bugs carrying: not simulated
+    case 88: return s8(A) < s8(G[B]);
+    case 89: return s8(G[B]) < s8(A);
+    case 90: return (pad.pressed & padMask(A)) != 0;
+    case 91: return (pad.pressed & padMask(A)) == 0;
+    case 92: case 93: {  // 0x42ba20 / 0x42ba70: menu item B's value == A / != A, gated by its link item's value
+        const auto& m = menu[B % menu.size()];
+        const bool linked = m[0] == 0 || menu[size_t(m[0]) % menu.size()][2] == m[1];
+        if (it.cond == 92) return linked && m[2] == A;
+        return m[0] == 0 ? m[2] != A : !linked && m[2] == A;  // (sic: an unmet link compares equal)
+    }
+    case 94: case 95: {  // 0x42bad0 / 0x42c140: capture a key / joystick button for the action of menu item B's value
+        // Item value -> >D / >J slot (keyNames order): C94 config kbdMap 8 9 10 11 6 7 4 5, C95 joyMap 0 1 2 3 4 5 7 6.
+        static constexpr size_t kKbd[8] = {2, 1, 3, 0, 4, 6, 7, 5}, kJoy[8] = {2, 1, 3, 0, 4, 6, 5, 7};
+        const int32_t v = menu[B % menu.size()][2];
+        if (it.cond == 94) {
+            if (key_ == 0 || v < 0 || v > 7) return false;
+            const size_t n = kKbd[v];
+            for (size_t j = 0; j < 8; ++j)  // the key's other slot takes the replaced key (swap)
+                if (j != n && keyCodes[j] == key_) keyCodes[j] = keyCodes[n], keyNames[j] = keyNames[n];
+            keyCodes[n] = key_, keyNames[n] = dikName(key_);
+            configChanged |= 1;
+            return true;
+        }
+        if (joyButton_ == 0xff || v < 0 || v > 7) return false;  // 0xfe (none held) is stored as well
+        const size_t n = kJoy[v];
+        for (size_t j = 0; j < 8; ++j)
+            if (j != n && joyButtons[j] == joyButton_) joyButtons[j] = joyButtons[n];
+        joyButtons[n] = joyButton_;
+        configChanged |= 2;
+        return true;
+    }
+    case 96: return (keys_ & 2) != 0;  // 0x42c670: Esc held (0x4b18d0 bit 1)
+    case 97: return helpRequest_;      // 0x42c680: F1 help request pending
+    case 98: return joystick == (A != 0);  // 0x42c690: config use-joystick (selects >D vs >J hint scripts)
+    default:
+        unsupported.insert(std::format("C{}", it.cond));
+        return false;  // out-of-table conditions also return false in the exe
+    }
+}
+
+void LitWorld::act(const LogicItem& it, LitActor* self) {
+    Mover& me = self ? static_cast<Mover&>(*self) : static_cast<Mover&>(p);
+    const uint16_t X = it.x;
+    uint8_t& sy = S[it.y & 0xff];
+    uint8_t& gy = G[it.y & 0xff];
+    // Every G add/sub/inc/dec maps index 7 to the 16-bit golden-carrot total G[7] | G[0xfc] << 8 (LOGIC.md §7).
+    auto gAdd = [&](uint16_t idx, int d) {
+        if ((idx & 0xff) == 7) {
+            const int v = goldenCarrots() + d;
+            G[7] = uint8_t(v), G[0xfc] = uint8_t(v >> 8);
+        } else {
+            G[idx & 0xff] = uint8_t(G[idx & 0xff] + d);
+        }
+    };
+    auto killSelf = [&] { if (self) self->flags14 |= 0x100; };
+    auto skip = [&] { unsupported.insert(std::format("A{}", it.act)); };
+    switch (it.act) {
+    case 0: case 61: case 62: case 65: return;               // nop
+    case 1: killSelf(); return;
+    case 2: ++sy; killSelf(); return;
+    case 3: ++sy; return;
+    case 4: gAdd(it.y, 1); return;
+    case 5: --sy; return;
+    case 6: gAdd(it.y, -1); return;
+    case 7: sy = 0; return;
+    case 8: gy = 0; return;
+    case 9: sy = uint8_t(-sy); return;
+    case 10: gy = uint8_t(-gy); return;
+    case 11: sy |= uint8_t(X); return;
+    case 12: gy |= uint8_t(X); return;
+    case 13: sy &= uint8_t(X); return;
+    case 14: gy &= uint8_t(X); return;
+    case 15: if (X) sy = uint8_t(rand_() % X); return;
+    case 16: if (X) gy = uint8_t(rand_() % X); return;
+    case 17: if (zoneMessages.size() < 8) zoneMessages.push_back(X); return;  // zone message queue 0x4b2480
+    case 18: sy = uint8_t(X); return;
+    case 19: gy = uint8_t(X); return;
+    case 20: sy = S[X & 0xff]; return;
+    case 21: gy = G[X & 0xff]; return;
+    case 22: ++sy; ++S[X & 0xff]; return;
+    case 23: gAdd(it.y, 1); gAdd(X, 1); return;
+    case 24: ++sy; ++S[X & 0xff]; killSelf(); return;
+    case 25: me.timer = 0; return;
+    case 26:                                                 // force Bugs into state X facing self
+        if (p.platform >= 0) { p.platform = -1; p.flags14 &= ~0x14u; }
+        forceState(X);
+        p.yaw = int16_t(me.yaw + 0x800);
+        p.flags14 |= 0x2000000;
+        return;
+    case 27: gy = S[X & 0xff]; return;
+    case 28: sy = G[X & 0xff]; return;
+    case 29: if (sy && me.timer / 30 > 1) { --sy; me.timer = 0; } return;
+    case 30: me.flags14 = (me.flags14 & ~0x400000u) | 0x200000; return;
+    case 31: me.flags14 = (me.flags14 & ~0x200000u) | 0x400000; return;
+    case 32: if (self) self->act3c &= ~0x40u; return;      // activation +0x3c &= ~0x40
+    case 33:  // 0x42cd20: drop the carried actor (or Bugs) where it is: flags14 & ~0x814 | 0x1000, self's zone / rotation
+        if (!self || self->rider == -1) return;
+        if (self->rider == -2) {
+            p.pos = frameWorld(int32_t(self - actors.data()), p.carrierPart, p.local);
+            p.carrier = -1;
+            p.carrierPart = -1;
+            p.flags14 = (p.flags14 & 0xfffff7ebu) | 0x1000;
+            p.zone = self->zone;
+            p.yaw = self->yaw;
+            p.lean = self->rot[2];
+        } else {
+            LitActor& c = actors[size_t(self->rider)];
+            c.flags14 = (c.flags14 & 0xfffff7ebu) | 0x1000;
+            c.parent = -1;
+            c.zone = self->zone;
+            c.rot = self->rot;
+            c.yaw = self->yaw;
+        }
+        self->rider = -1;
+        return;
+    case 63:  // 0x42d370: free the carried actor (Bugs is never freed: only unlinked)
+        if (!self || self->rider == -1) return;
+        if (self->rider == -2) p.carrier = -1, p.carrierPart = -1;
+        else actors[size_t(self->rider)].flags14 |= 0x100, actors[size_t(self->rider)].parent = -1;
+        self->rider = -1;
+        return;
+    case 34: playSound(self, X); return;
+    case 35: G[1] = 0; kill(int16_t(deathStateA92_ ? deathStateA92_ : defaultDeathState_)); return;
+    case 36: sy = uint8_t(sy + X); return;
+    case 37: gAdd(it.y, X); return;
+    case 38: me.yaw = int16_t(me.yaw + X * 16 + it.y); return;
+    case 39: sy = uint8_t(sy - X); return;
+    case 40: gAdd(it.y, -int(X)); return;
+    case 41: camHold_ = X; p.flags14 |= 0x80000000; return;
+    case 42: nextLevel = G[0x0e]; return;                    // goto level G[0x0e]
+    case 43: p.yaw = int16_t(X << 4); return;
+    case 45: sy = uint8_t(me.reg); return;
+    case 46: me.reg = sy; return;
+    case 47: p.flags18 |= 1; return;
+    case 48: if (G[1] < G[2]) ++G[1]; else gAdd(it.y, 1); return;  // gvcrt
+    case 49: overlayStatus_ = overlay(X); return;           // overlay script X / S[Y] / G[Y]
+    case 51: overlayStatus_ = overlay(sy); return;
+    case 52: overlayStatus_ = overlay(gy); return;
+    case 50:                                                 // kill actor(s) with entity id X (0xff: all overlays)
+        for (LitActor& a : actors)
+            if (!a.dead && (X == 0xff ? a.type == 0x20 : a.entityId == X)) {
+                a.flags14 |= 0x100;
+                if (X != 0xff) break;
+            }
+        return;
+    case 53: me.yaw = int16_t(me.yaw + int8_t(sy)); return;
+    case 54: if (self) self->animState.flags |= AnimPause; return;
+    case 55: if (self) self->animState.flags &= ~uint32_t(AnimPause); return;
+    case 57: case 58: case 66: case 67: return;              // rumble: PadSetAct is a no-op on PC
+    case 56:  // 0x42d240: clears the flagsB 0x2000000 rate accumulator and its last root y; +0x192 = 0, +0x196 = y
+        rateAcc_ = rateY_ = 0;
+        if (self) self->drift = 0, self->param = int16_t(self->pos.y);
+        return;
+    case 60:
+        for (int k = 0; k < X && k < 8; ++k)
+            if (!(gy >> k & 1)) gAdd(7, 1);
+        return;
+    case 64: if (self) self->act3c |= 0x40; return;
+    case 69: if (it.y < 3) fade.rgb[it.y] = uint8_t(X); return;  // flash colour R / G / B (0x42d510)
+    case 70: if (X == 0) fadeIn(1, 0x100); else if (X == 1) fadeOut(2, 0x100); return;  // 16-tick fade
+    case 71: fadeIn(0x41, 0x400); return;                    // colour flash: 4 ticks in, 4 back
+    case 72:                                                 // damage Bugs X (§3.6)
+        if (invuln_ == 0) {
+            G[1] = uint8_t(G[1] - X);
+            p.flags14 |= 0x2000000;
+            invuln_ = 0x1e;
+        }
+        return;
+    case 73: cam.flags &= ~0x2000u; return;
+    case 74: cam.flags |= 0x2000; return;
+    case 75: me.yaw = int16_t(me.yaw + (((X * 16 + it.y) * pad.sx * 2) >> 7)); return;
+    case 76: me.yaw = int16_t(me.yaw + ((int8_t(sy) * pad.sx * 2) >> 7)); return;
+    case 77: cam.heightOffset = -200, cam.eyeHeight = 600, cam.distance = 1100; return;
+    case 78: cam.heightOffset = X * 100 + it.y; return;
+    case 79: cam.eyeHeight = X * 100 + it.y; return;
+    case 80: cam.distance = X * 100 + it.y; return;
+    case 81:  // speech XA control 0x42d750: status S[0x17] (8 start, 1 stop-all, 0 idle), advanced by speechTick
+        if (X > 1) S[0x17] = 8, speech_ = uint8_t(X);
+        else if (X == 1) speech_ = 0, S[0x17] = 1;
+        else speech_ = 0, S[0x17] = 0;
+        return;
+    case 82: playSound(self, X, 2); return;                  // 0x42d7f0: release
+    case 83: cam.flags |= 0x8000; return;
+    case 84: cam.flags &= ~0x8000u; return;
+    case 86: p.flags14 |= 0x80000000; return;
+    case 87: me.flags18 |= 0x400; return;
+    case 88: shadowMaxY = int8_t(X) * 100 + int8_t(it.y); return;  // 0x42d710 (movsx bytes)
+    case 89: sy = uint8_t(angleDiff(ratan2(p.pos.x - me.pos.x, p.pos.z - me.pos.z), me.yaw) >> 4); return;
+    case 90: cam.flags &= ~0x300u; return;
+    case 91: shadowMaxY = int32_t(uint32_t(X) << 8 | it.y); return;  // 0x42d730 (upper ecx bits Inferred zero)
+    case 92: deathStateA92_ = X; return;
+    case 94: cam.flags |= 1; return;
+    case 95: cam.flags &= ~1u; return;
+    case 96: cam.flags = 0x10; return;
+    case 97: p.flags14 &= ~9u; return;
+    case 98: cam.flags |= 0x20; return;
+    case 99: cam.flags &= ~0x20u; return;
+    case 101: cam.flags |= 4; return;
+    case 93:  // 0x42d910: title slot lines 1-6, "N. <golden> <clocks>" (saved) or "N. Empty", green on slot G[X]
+        for (uint8_t k = 0; k < 6; ++k) {
+            const bool sel = G[X & 0xff] == k + 1;
+            overlay(uint16_t((saveMask >> k & 1 ? (sel ? 0x36 : 0x2e) : (sel ? 0x46 : 0x3e)) + k));
+        }
+        return;
+    case 100: {  // 0x42dae0: slot cursor G[X] onto a saved slot, searching in the raw pad's direction (→/↓ forward)
+        uint8_t& c = G[X & 0xff];
+        const auto saved = [&](int s) { return (saveMask >> ((s - 1) & 31) & 1) != 0; };
+        if (saved(c)) return;
+        int v = c;
+        if (!(pad.raw & (PadRight | PadDown))) {
+            while (v > 0 && !saved(v)) --v;
+            if (v < 1) {
+                if (pad.raw & PadLeft) { c = uint8_t(c + 3); return; }
+                for (v = 1; v < 7 && !saved(v); ++v) {}
+            }
+        } else {
+            while (v < 7 && !saved(v)) ++v;
+            if (v > 6) {
+                if (pad.raw & PadRight) { c = uint8_t(c - 3); return; }
+                for (v = 6; !saved(v);)
+                    if (--v < 1) break;
+            }
+        }
+        c = uint8_t(v);
+        return;
+    }
+    case 102: case 103: case 104: case 105: case 109: case 110: case 119: case 126: case 127: {
+        if (it.y >= menu.size()) return;  // 0x42dbe0..: menu item Y (all but A109/A110 check the bound)
+        auto& m = menu[it.y];
+        int32_t& v = m[2];
+        switch (it.act) {
+        case 102: v = v < m[3] - 1 ? v + 1 : 0; return;  // next (wraps)
+        case 103: v = (v < 1 ? m[3] : v) - 1; return;    // previous (wraps)
+        case 104: if (v >= 0 && v <= m[3] - 1) v = X; return;
+        case 105: m[3] = X < 0x14 ? X : 0; return;
+        case 109: m[0] = X; return;
+        case 110: m[1] = X; return;
+        case 119:  // 0x42e1c0: item Y set -> item X clamped to <= 5
+            if (v && X < menu.size()) menu[X][2] = std::min(menu[X][2], 5);
+            return;
+        case 126: v = volume34 / 5 - 10; return;
+        default: v = volume30 / 10; return;
+        }
+    }
+    case 120: menuLock = 1; return;
+    case 121: menuLock = 0; return;
+    case 122: volume34 = volume34 < 0x5f ? volume34 + 5 : 0; configChanged |= 4; return;  // config +0x34, WriteConfig
+    case 123: volume34 = volume34 < 0x33 ? 100 : volume34 - 5; configChanged |= 4; return;
+    case 124: volume30 = volume30 < 100 ? volume30 + 10 : 0; configChanged |= 4; return;  // config +0x30
+    case 125: volume30 = volume30 < 1 ? 100 : volume30 - 10; configChanged |= 4; return;
+    case 106: case 107: case 108: case 111: case 112: case 113: case 114: case 115: case 116: case 117: case 118: {
+        // Video page (0x42dcd0..0x42e050; no bound check on item Y in the exe). Mode list 0x7c62a0 = the fullscreen /
+        // windowed table 0x467410 / 0x467470 (the same 8 {w, h}; 0x4674d0 belongs to config +0x0c = 2, never in bbtime),
+        // entry i usable when the display offers it (modeValid, 0x409990).
+        static constexpr int32_t kModes[8][2] = {{0, 0}, {320, 240}, {512, 384}, {640, 480}, {800, 600}, {1024, 768}, {0, 0}, {0, 0}};
+        auto valid = [&](int32_t i) { return i >= 0 && i < 8 && modeValid[size_t(i)]; };
+        auto mode = [&](int32_t i, int c) { return i >= 0 && i < 8 ? kModes[i][c] : 0; };
+        int32_t& v = menu[it.y % menu.size()][2];
+        switch (it.act) {
+        case 106: {  // step down to the previous usable mode (none: unchanged)
+            const int32_t was = v;
+            if (was > 0) {
+                int32_t i;
+                v = was - 1;
+                do { i = v; if (valid(i)) break; v = i - 1; } while (i > -1);
+                if (v < 0) v = was;
+            }
+            return;
+        }
+        case 107: {  // step up; windowed (A116 choice 0) also stops on a mode at least the desktop size
+            const int32_t was = v;
+            if (was < 7) {
+                int32_t i;
+                v = was + 1;
+                do { i = v; if (valid(i) || (!videoSel_.full && (deskW <= mode(i, 0) || deskH <= mode(i, 1)))) break; v = i + 1; } while (i < 8);
+                if (v > 7) v = was;
+            }
+            return;
+        }
+        case 108:  // the configured resolution's index (unchanged when not listed)
+            for (int32_t i = 0; i < 8; ++i)
+                if (kModes[i][0] == video.width && kModes[i][1] == video.height) { v = i; break; }
+            return;
+        case 111: v = video.fullscreen ? 1 : 0; return;
+        case 112: v = video.fogDist; return;
+        case 113: v = video.renderer == 2 ? 0 : video.renderer == 0 ? 1 : video.renderer == 1 ? 2 : v; return;  // 0x4ac094
+        case 114: videoSel_.w = mode(v, 0), videoSel_.h = mode(v, 1); return;
+        case 115: videoSel_.fog = v; return;
+        case 116: videoSel_.full = uint8_t(v); return;  // config +0x0c != 2: the item's low byte
+        case 117: videoSel_.rend = v; return;
+        default: {  // A118: apply. Windowed: step down while the mode covers the desktop; WriteConfig, 0x45f2b0 = 0x13
+            if (!videoSel_.full)
+                while (deskW <= videoSel_.w && deskH <= videoSel_.h) {
+                    int32_t i = v;
+                    v = i - 1;
+                    while (i > -1) { i = v; if (valid(i)) break; v = i - 1; }
+                    videoSel_.w = mode(v, 0), videoSel_.h = mode(v, 1);
+                }
+            video.fullscreen = videoSel_.full, video.fogDist = videoSel_.fog;
+            video.width = videoSel_.w, video.height = videoSel_.h;
+            if (videoSel_.rend == 2) videoSel_.rend = video.renderer;  // (sic) config +0x0c == 0
+            video.renderer = videoSel_.rend == 0 ? 2 : videoSel_.rend == 1 ? 0 : videoSel_.rend == 2 ? 1 : video.renderer;
+            configChanged |= 8;
+            return;
+        }
+        }
+    }
+    case 59:  // 0x42d2c0 camera shake: speed X·11, amplitude / duration Y (phase restarts unless already shaking)
+        if (shakeAmp_ == 0) shakePhase_ = 0;
+        shakeSpeed_ = int16_t(X * 0xb), shakeAmp_ = int16_t(it.y);
+        return;
+    case 68:  // 0x42d460: the same, scaled down with self's distance from the look-at point (none at 0x800 or more)
+        if (shakeAmp_ == 0) {
+            const int32_t len = approxLen(me.pos.x - cam.target.x, me.pos.y - cam.target.y, me.pos.z - cam.target.z);
+            if (len < 0x800) {
+                shakePhase_ = 0, shakeSpeed_ = int16_t(X * 0xb);
+                shakeAmp_ = int16_t(it.y - int16_t(int32_t(uint32_t(len) * it.y) / 0x800));
+            }
+        }
+        return;
+    case 85: camTarget_ = self ? int32_t(self - actors.data()) : -1; return;  // 0x42d840: camera follows self next tick
+    case 128: quitRequest = true; return;  // 0x42e350: 0x45f2b0 = 0x14, the "Do you really want to quit?" dialog
+    case 44: p.shadowBias = int16_t(X); return;  // 0x42d0a0: player +0x28 = X (LitWorld::Shadow::sortBias)
+    default: skip();
+    }
+}
+
+} // namespace bb::game
